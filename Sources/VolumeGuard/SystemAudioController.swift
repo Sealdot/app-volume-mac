@@ -34,7 +34,16 @@ enum AudioControllerError: LocalizedError {
 final class SystemAudioController {
     typealias ChangeHandler = () -> Void
 
+    private struct DeviceMetadata {
+        let deviceID: AudioObjectID
+        let name: String
+        let canSetVolume: Bool
+        let outputChannelCount: UInt32
+    }
+
     private let listenerQueue = DispatchQueue(label: "com.volumeguard.audio-listener")
+    private let metadataLock = NSLock()
+    private var cachedMetadata: DeviceMetadata?
     private var handler: ChangeHandler?
     private var systemListener: AudioObjectPropertyListenerBlock?
     private var observedSystemAddresses: [AudioObjectPropertyAddress] = []
@@ -115,17 +124,22 @@ final class SystemAudioController {
             )
         }
 
-        let volume = try? currentVolume(deviceID: deviceID)
+        let metadata = metadataForDevice(deviceID)
+        let volume = try? currentVolume(
+            deviceID: deviceID,
+            channelCount: metadata.outputChannelCount
+        )
         return AudioDeviceSnapshot(
             deviceID: deviceID,
-            deviceName: deviceName(deviceID: deviceID),
+            deviceName: metadata.name,
             volume: volume,
-            canSetVolume: hasWritableVolume(deviceID: deviceID)
+            canSetVolume: metadata.canSetVolume
         )
     }
 
     func setVolume(_ requestedVolume: Double) throws {
         let deviceID = try defaultOutputDevice()
+        let metadata = metadataForDevice(deviceID)
         let target = Float32(min(max(requestedVolume, 0), 1))
 
         var virtualMasterAddress = Self.virtualMasterVolumeAddress
@@ -162,7 +176,10 @@ final class SystemAudioController {
             return
         }
 
-        let channels = readableChannelVolumes(deviceID: deviceID).filter { channel, _ in
+        let channels = readableChannelVolumes(
+            deviceID: deviceID,
+            channelCount: metadata.outputChannelCount
+        ).filter { channel, _ in
             var address = Self.volumeAddress(element: channel)
             return isSettable(deviceID: deviceID, address: &address)
         }
@@ -219,7 +236,7 @@ final class SystemAudioController {
         return deviceID
     }
 
-    private func currentVolume(deviceID: AudioObjectID) throws -> Double {
+    private func currentVolume(deviceID: AudioObjectID, channelCount: UInt32) throws -> Double {
         var virtualMasterAddress = Self.virtualMasterVolumeAddress
         if let value = readScalar(deviceID: deviceID, address: &virtualMasterAddress) {
             return Double(value)
@@ -230,16 +247,21 @@ final class SystemAudioController {
             return Double(value)
         }
 
-        let channelVolumes = readableChannelVolumes(deviceID: deviceID).map { $0.value }
+        let channelVolumes = readableChannelVolumes(
+            deviceID: deviceID,
+            channelCount: channelCount
+        ).map { $0.value }
         guard let loudest = channelVolumes.max() else {
             throw AudioControllerError.volumeUnavailable
         }
         return Double(loudest)
     }
 
-    private func readableChannelVolumes(deviceID: AudioObjectID) -> [(channel: UInt32, value: Float32)] {
+    private func readableChannelVolumes(
+        deviceID: AudioObjectID,
+        channelCount: UInt32
+    ) -> [(channel: UInt32, value: Float32)] {
         var volumes: [(channel: UInt32, value: Float32)] = []
-        let channelCount = outputChannelCount(deviceID: deviceID)
         guard channelCount > 0 else { return [] }
         for channel in UInt32(1)...channelCount {
             var address = Self.volumeAddress(element: channel)
@@ -268,14 +290,13 @@ final class SystemAudioController {
         return status == noErr ? value : nil
     }
 
-    private func hasWritableVolume(deviceID: AudioObjectID) -> Bool {
+    private func hasWritableVolume(deviceID: AudioObjectID, channelCount: UInt32) -> Bool {
         var virtualMasterAddress = Self.virtualMasterVolumeAddress
         if isSettable(deviceID: deviceID, address: &virtualMasterAddress) { return true }
 
         var masterAddress = Self.volumeAddress(element: kAudioObjectPropertyElementMaster)
         if isSettable(deviceID: deviceID, address: &masterAddress) { return true }
 
-        let channelCount = outputChannelCount(deviceID: deviceID)
         guard channelCount > 0 else { return false }
         for channel in UInt32(1)...channelCount {
             var address = Self.volumeAddress(element: channel)
@@ -333,13 +354,44 @@ final class SystemAudioController {
         return min(count, 64)
     }
 
+    private func metadataForDevice(_ deviceID: AudioObjectID) -> DeviceMetadata {
+        metadataLock.lock()
+        if let cached = cachedMetadata, cached.deviceID == deviceID {
+            metadataLock.unlock()
+            return cached
+        }
+        metadataLock.unlock()
+
+        let channelCount = outputChannelCount(deviceID: deviceID)
+        let metadata = DeviceMetadata(
+            deviceID: deviceID,
+            name: deviceName(deviceID: deviceID),
+            canSetVolume: hasWritableVolume(deviceID: deviceID, channelCount: channelCount),
+            outputChannelCount: channelCount
+        )
+        metadataLock.lock()
+        cachedMetadata = metadata
+        metadataLock.unlock()
+        return metadata
+    }
+
+    private func invalidateDeviceMetadata() {
+        metadataLock.lock()
+        cachedMetadata = nil
+        metadataLock.unlock()
+    }
+
     private func bindToCurrentDevice() {
         removeDeviceListeners()
         guard let deviceID = try? defaultOutputDevice() else { return }
         observedDeviceID = deviceID
 
-        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.deliverChange()
+        let block: AudioObjectPropertyListenerBlock = { [weak self] count, addresses in
+            guard let self = self else { return }
+            for index in 0..<Int(count) where addresses[index].mSelector == kAudioDevicePropertyDeviceIsAlive {
+                self.invalidateDeviceMetadata()
+            }
+            self.deliverChange()
         }
         deviceListener = block
 
@@ -386,6 +438,7 @@ final class SystemAudioController {
         observedAddresses.removeAll()
         observedDeviceID = AudioObjectID(kAudioObjectUnknown)
         deviceListener = nil
+        invalidateDeviceMetadata()
     }
 
     private func deliverChange() {

@@ -130,7 +130,24 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        menu.addItem(actionItem("打开设置…", action: #selector(openSettings), keyEquivalent: ","))
+        if status.foregroundBundleIdentifier != nil {
+            let hasRule = settingsStore.settings.appRules.contains {
+                $0.bundleIdentifier == status.foregroundBundleIdentifier
+            }
+            let title = hasRule
+                ? "编辑 \(status.foregroundAppName) 规则…"
+                : "为 \(status.foregroundAppName) 添加规则…"
+            menu.addItem(actionItem(title, action: #selector(openCurrentAppRule)))
+        }
+        let source = NSMenuItem(
+            title: "生效规则：\(status.effectiveLimit.sourceName)",
+            action: nil,
+            keyEquivalent: ""
+        )
+        source.isEnabled = false
+        menu.addItem(source)
+        menu.addItem(.separator())
+        menu.addItem(actionItem("设置…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(actionItem("立即检查", action: #selector(checkNow)))
         menu.addItem(.separator())
         menu.addItem(actionItem("退出音量卫士", action: #selector(quit), keyEquivalent: "q"))
@@ -193,6 +210,13 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     @objc private func openSettings() {
         settingsWindowController.showWindow(self)
+    }
+
+    @objc private func openCurrentAppRule() {
+        settingsWindowController.showRules(
+            addingBundleIdentifier: status.foregroundBundleIdentifier,
+            appName: status.foregroundAppName
+        )
     }
 
     @objc private func checkNow() {

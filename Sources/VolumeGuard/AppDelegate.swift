@@ -12,7 +12,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let defaults: UserDefaults
-        if let suiteName = ProcessInfo.processInfo.environment["VOLUME_GUARD_TEST_SUITE"],
+        let suiteArgument = CommandLine.arguments.first(where: { $0.hasPrefix("--test-suite=") })
+        let suiteFromArgument = suiteArgument.flatMap { argument -> String? in
+            guard let separator = argument.firstIndex(of: "=") else { return nil }
+            return String(argument[argument.index(after: separator)...])
+        }
+        if let suiteName = ProcessInfo.processInfo.environment["VOLUME_GUARD_TEST_SUITE"] ?? suiteFromArgument,
            let isolatedDefaults = UserDefaults(suiteName: suiteName) {
             defaults = isolatedDefaults
         } else {
@@ -23,6 +28,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsStore.update {
                 $0.isProtectionEnabled = false
                 $0.notificationsEnabled = false
+            }
+        }
+        if CommandLine.arguments.contains("--ui-fixture") {
+            settingsStore.update {
+                $0.defaultMaximumVolume = 0.20
+                $0.appRules = [
+                    AppVolumeRule(
+                        bundleIdentifier: "us.zoom.xos",
+                        appName: "Zoom",
+                        maximumVolume: 1.0
+                    ),
+                    AppVolumeRule(
+                        bundleIdentifier: "com.apple.Music",
+                        appName: "音乐",
+                        maximumVolume: 0.20
+                    )
+                ]
             }
         }
         eventStore = ProtectionEventStore(defaults: defaults, maximumCount: 20)
@@ -43,7 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         settingsWindowController = SettingsWindowController(
             settingsStore: settingsStore,
-            launchAtLoginManager: launchAtLoginManager
+            launchAtLoginManager: launchAtLoginManager,
+            protectionController: protectionController
         )
         statusMenuController = StatusMenuController(
             settingsStore: settingsStore,
@@ -61,6 +84,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--show-settings") {
             DispatchQueue.main.async { [weak self] in
                 self?.settingsWindowController.showWindow(nil)
+            }
+        }
+
+        if let snapshotArgument = CommandLine.arguments.first(where: { $0.hasPrefix("--snapshot-settings=") }),
+           let separator = snapshotArgument.firstIndex(of: "=") {
+            let path = String(snapshotArgument[snapshotArgument.index(after: separator)...])
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if CommandLine.arguments.contains("--snapshot-pane=rules") {
+                    self.settingsWindowController.showRules()
+                } else {
+                    self.settingsWindowController.showWindow(nil)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    let didWrite = self.settingsWindowController.writeSnapshot(to: URL(fileURLWithPath: path))
+                    let result = didWrite ? "设置截图已写入：\(path)\n" : "设置截图写入失败：\(path)\n"
+                    FileHandle.standardError.write(Data(result.utf8))
+                    self.settingsWindowController.close()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        NSApp.terminate(nil)
+                    }
+                }
             }
         }
     }

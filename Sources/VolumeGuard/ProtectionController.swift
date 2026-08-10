@@ -21,6 +21,8 @@ struct GuardRuntimeStatus: Equatable {
 }
 
 final class ProtectionController {
+    static let didChangeNotification = Notification.Name("VolumeGuard.ProtectionStatusDidChange")
+
     var onStatusChange: ((GuardRuntimeStatus) -> Void)?
     var onProtectionEvent: ((ProtectionEvent) -> Void)?
 
@@ -191,6 +193,7 @@ final class ProtectionController {
             foregroundBundleIdentifier: bundleID,
             lastError: lastError
         )
+        NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
         onStatusChange?(status)
     }
 

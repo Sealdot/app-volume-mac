@@ -35,7 +35,7 @@ public struct GuardSettings: Codable, Equatable {
 
     public init(
         isProtectionEnabled: Bool = true,
-        defaultMaximumVolume: Double = 0.70,
+        defaultMaximumVolume: Double = 0.20,
         launchAtLogin: Bool = false,
         notificationsEnabled: Bool = true,
         appRules: [AppVolumeRule] = []

@@ -19,7 +19,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defaults = .standard
         }
         settingsStore = SettingsStore(defaults: defaults)
-        eventStore = ProtectionEventStore(defaults: defaults, maximumCount: 100)
+        if ProcessInfo.processInfo.environment["VOLUME_GUARD_DISABLE_PROTECTION"] == "1" {
+            settingsStore.update {
+                $0.isProtectionEnabled = false
+                $0.notificationsEnabled = false
+            }
+        }
+        eventStore = ProtectionEventStore(defaults: defaults, maximumCount: 20)
         audioController = SystemAudioController()
         launchAtLoginManager = LaunchAtLoginManager()
         launchAtLoginManager.refreshPathIfEnabled()

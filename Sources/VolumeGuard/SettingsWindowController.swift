@@ -1,17 +1,19 @@
 import AppKit
 import VolumeGuardCore
 
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let settingsStore: SettingsStore
     private let launchAtLoginManager: LaunchAtLoginManager
 
-    private let protectionCheckbox = NSButton(checkboxWithTitle: "启用音量保护", target: nil, action: nil)
-    private let globalSlider = NSSlider(value: 0.70, minValue: 0.20, maxValue: 1.00, target: nil, action: nil)
-    private let globalValueLabel = NSTextField(labelWithString: "70%")
-    private let loginCheckbox = NSButton(checkboxWithTitle: "登录 Mac 时自动启动", target: nil, action: nil)
-    private let notificationCheckbox = NSButton(checkboxWithTitle: "自动调低时显示通知", target: nil, action: nil)
-    private let runningAppsPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let rulesStack = NSStackView()
+    // AppKit controls and the window are intentionally created only when the
+    // user opens Settings. The menu-bar process stays small while idle.
+    private var protectionCheckbox: NSButton!
+    private var globalSlider: NSSlider!
+    private var globalValueLabel: NSTextField!
+    private var loginCheckbox: NSButton!
+    private var notificationCheckbox: NSButton!
+    private var runningAppsPopup: NSPopUpButton!
+    private var rulesStack: NSStackView!
     private var runningApplications: [NSRunningApplication] = []
     private var settingsObserver: NSObjectProtocol?
     private var isPerformingUpdate = false
@@ -20,25 +22,16 @@ final class SettingsWindowController: NSWindowController {
         self.settingsStore = settingsStore
         self.launchAtLoginManager = launchAtLoginManager
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 610),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "音量卫士设置"
-        window.center()
-        window.isReleasedWhenClosed = false
-        super.init(window: window)
+        super.init(window: nil)
 
-        buildInterface()
-        refreshAll()
         settingsObserver = NotificationCenter.default.addObserver(
             forName: SettingsStore.didChangeNotification,
             object: settingsStore,
             queue: .main
         ) { [weak self] _ in
-            guard let self = self, !self.isPerformingUpdate else { return }
+            guard let self = self,
+                  self.isWindowLoaded,
+                  !self.isPerformingUpdate else { return }
             self.refreshAll()
         }
     }
@@ -53,11 +46,59 @@ final class SettingsWindowController: NSWindowController {
         }
     }
 
-    override func showWindow(_ sender: Any?) {
+    override func loadWindow() {
+        let settingsWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 610),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        settingsWindow.title = "音量卫士设置"
+        settingsWindow.center()
+        settingsWindow.isReleasedWhenClosed = false
+        settingsWindow.delegate = self
+        window = settingsWindow
+
+        createControls()
+        buildInterface()
         refreshAll()
+    }
+
+    override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
+        refreshAll()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(sender)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        // Release the complete control tree after closing so opening Settings
+        // once does not permanently increase the menu-bar process footprint.
+        DispatchQueue.main.async { [weak self] in
+            self?.releaseWindowResources()
+        }
+    }
+
+    private func releaseWindowResources() {
+        window = nil
+        protectionCheckbox = nil
+        globalSlider = nil
+        globalValueLabel = nil
+        loginCheckbox = nil
+        notificationCheckbox = nil
+        runningAppsPopup = nil
+        rulesStack = nil
+        runningApplications.removeAll(keepingCapacity: false)
+    }
+
+    private func createControls() {
+        protectionCheckbox = NSButton(checkboxWithTitle: "启用音量保护", target: nil, action: nil)
+        globalSlider = NSSlider(value: 0.20, minValue: 0.20, maxValue: 1.00, target: nil, action: nil)
+        globalValueLabel = NSTextField(labelWithString: "20%")
+        loginCheckbox = NSButton(checkboxWithTitle: "登录 Mac 时自动启动", target: nil, action: nil)
+        notificationCheckbox = NSButton(checkboxWithTitle: "自动调低时显示通知", target: nil, action: nil)
+        runningAppsPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        rulesStack = NSStackView()
     }
 
     private func buildInterface() {

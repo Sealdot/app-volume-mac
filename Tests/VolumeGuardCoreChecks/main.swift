@@ -20,6 +20,10 @@ private func close(_ lhs: Double, _ rhs: Double, tolerance: Double = 0.0001) -> 
 }
 
 private let checks: [(String, () throws -> Void)] = [
+    ("首次安装默认上限为 20%", {
+        let settings = GuardSettings()
+        try expect(close(settings.defaultMaximumVolume, 0.20), "首次安装默认上限应为 20%")
+    }),
     ("无匹配规则时使用默认上限", {
         let settings = GuardSettings(defaultMaximumVolume: 0.70)
         let limit = VolumePolicy.effectiveLimit(
@@ -136,7 +140,7 @@ private let checks: [(String, () throws -> Void)] = [
         defaults.set(Data("not-json".utf8), forKey: "settings")
         let store = SettingsStore(defaults: defaults, storageKey: "settings")
         try expect(store.settings.isProtectionEnabled, "默认应开启保护")
-        try expect(close(store.settings.defaultMaximumVolume, 0.70), "默认上限应为 70%")
+        try expect(close(store.settings.defaultMaximumVolume, 0.20), "默认上限应为 20%")
     }),
     ("事件历史有数量上限", {
         let suite = "VolumeGuardChecks.\(UUID().uuidString)"

@@ -39,14 +39,14 @@ ACTUAL_VOLUME=82
 for _ in {1..20}; do
   sleep 0.1
   ACTUAL_VOLUME="$(osascript -e 'output volume of (get volume settings)')"
-  if (( ACTUAL_VOLUME <= 71 )); then
+  if (( ACTUAL_VOLUME <= 21 )); then
     break
   fi
 done
 
 ACTUAL_MUTED="$(osascript -e 'output muted of (get volume settings)')"
-if (( ACTUAL_VOLUME > 71 )); then
-  echo "集成测试失败：音量仍为 $ACTUAL_VOLUME%，未降到 70% 上限"
+if (( ACTUAL_VOLUME > 21 )); then
+  echo "集成测试失败：音量仍为 $ACTUAL_VOLUME%，未降到 20% 上限"
   exit 1
 fi
 if [[ "$ACTUAL_MUTED" != "true" ]]; then

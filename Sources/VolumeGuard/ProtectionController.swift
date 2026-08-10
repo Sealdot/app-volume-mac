@@ -154,6 +154,7 @@ final class ProtectionController {
         }
 
         var lastError: String?
+        var displayedVolume = snapshot.volume
         if let volume = snapshot.volume,
            snapshot.canSetVolume,
            let decision = VolumePolicy.clampDecision(
@@ -174,18 +175,18 @@ final class ProtectionController {
                 eventStore.append(event)
                 onProtectionEvent?(event)
                 sendNotificationIfNeeded(event: event, settings: settings)
+                displayedVolume = decision.targetVolume
             } catch {
                 lastError = error.localizedDescription
                 nextState = .unsupported
             }
         }
 
-        let refreshedSnapshot = audioController.snapshot()
         status = GuardRuntimeStatus(
             state: nextState,
-            currentVolume: refreshedSnapshot.volume,
+            currentVolume: displayedVolume,
             effectiveLimit: limit,
-            deviceName: refreshedSnapshot.deviceName,
+            deviceName: snapshot.deviceName,
             foregroundAppName: appName,
             foregroundBundleIdentifier: bundleID,
             lastError: lastError

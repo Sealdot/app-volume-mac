@@ -4,16 +4,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_EXECUTABLE="$PROJECT_DIR/dist/VolumeGuard.app/Contents/MacOS/VolumeGuard"
+TEST_SUITE="com.volumeguard.performance.$$.test"
 
 if [[ ! -x "$APP_EXECUTABLE" ]]; then
   "$SCRIPT_DIR/build-app.sh"
 fi
 
+VOLUME_GUARD_TEST_SUITE="$TEST_SUITE" \
+VOLUME_GUARD_DISABLE_PROTECTION=1 \
 "$APP_EXECUTABLE" >/tmp/volume-guard-performance.log 2>&1 &
 APP_PID=$!
 cleanup() {
   kill "$APP_PID" >/dev/null 2>&1 || true
   wait "$APP_PID" >/dev/null 2>&1 || true
+  defaults delete "$TEST_SUITE" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 

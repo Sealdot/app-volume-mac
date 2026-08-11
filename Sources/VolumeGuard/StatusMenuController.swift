@@ -135,15 +135,6 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        if status.foregroundBundleIdentifier != nil {
-            let hasRule = settingsStore.settings.appRules.contains {
-                $0.bundleIdentifier == status.foregroundBundleIdentifier
-            }
-            let title = hasRule
-                ? "编辑 \(status.foregroundAppName) 规则…"
-                : "设置 \(status.foregroundAppName) 规则…"
-            menu.addItem(actionItem(title, action: #selector(openCurrentAppRule)))
-        }
         let source = NSMenuItem(
             title: "生效规则：\(status.effectiveLimit.sourceName)",
             action: nil,
@@ -218,12 +209,6 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     @objc private func openSettings() {
         settingsWindowController.showWindow(self)
-    }
-
-    @objc private func openCurrentAppRule() {
-        settingsWindowController.showRules(
-            focusingBundleIdentifier: status.foregroundBundleIdentifier
-        )
     }
 
     @objc private func checkNow() {

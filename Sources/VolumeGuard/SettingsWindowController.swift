@@ -36,7 +36,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private var addRunningAppButton: NSButton!
     private var rulesStack: NSStackView!
     private var runningApplications: [NSRunningApplication] = []
-    private var preferredRunningAppBundleIdentifier: String?
 
     init(
         settingsStore: SettingsStore,
@@ -118,10 +117,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         window?.makeKeyAndOrderFront(sender)
     }
 
-    func showRules(focusingBundleIdentifier bundleIdentifier: String? = nil) {
-        // Navigating to settings must not mutate user data. If the foreground
-        // App has no rule, preselect it and require an explicit “添加” click.
-        preferredRunningAppBundleIdentifier = bundleIdentifier
+    func showRules() {
         selectedPane = .rules
         showWindow(nil)
         showSelectedPane()
@@ -168,7 +164,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             return false
         }
         row.performRemoveForTesting()
-        showRules(focusingBundleIdentifier: removedRule.bundleIdentifier)
+        showRules()
         let expectedCount = before - 1
         let displayedCount = rulesStack.arrangedSubviews.compactMap { $0 as? RuleRowView }.count
         return settingsStore.settings.appRules.count == expectedCount
@@ -637,12 +633,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             runningAppsPopup.addItems(withTitles: runningApplications.map { $0.localizedName ?? "未知 App" })
             runningAppsPopup.isEnabled = true
             addRunningAppButton.isEnabled = true
-            if let preferredBundleIdentifier = preferredRunningAppBundleIdentifier,
-               let index = runningApplications.firstIndex(where: {
-                   $0.bundleIdentifier == preferredBundleIdentifier
-               }) {
-                runningAppsPopup.selectItem(at: index)
-            }
         }
     }
 
@@ -757,7 +747,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         addRunningAppButton = nil
         rulesStack = nil
         runningApplications.removeAll(keepingCapacity: false)
-        preferredRunningAppBundleIdentifier = nil
     }
 
     @objc private func protectionChanged() {

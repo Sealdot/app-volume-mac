@@ -159,6 +159,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         }
     }
 
+    /// Exercises the same target/action path as a real click for UI smoke tests.
+    @discardableResult
+    func removeFirstRuleForTesting() -> Bool {
+        selectedPane = .rules
+        showWindow(nil)
+        showSelectedPane(animated: false)
+        window?.displayIfNeeded()
+        let before = settingsStore.settings.appRules.count
+        guard before > 0,
+              let row = rulesStack.arrangedSubviews.compactMap({ $0 as? RuleRowView }).first else {
+            return false
+        }
+        row.performRemoveForTesting()
+        return settingsStore.settings.appRules.count == before - 1
+    }
+
     func windowWillClose(_ notification: Notification) {
         let closingWindow = notification.object as? NSWindow
         DispatchQueue.main.async { [weak self] in
@@ -405,7 +421,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         scrollView.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
         scrollView.heightAnchor.constraint(equalToConstant: 250).isActive = true
 
-        let footer = wrappingLabel("规则只改变允许的最高音量；离开 App 时不会自动把音量调高。")
+        let footer = wrappingLabel("规则只在场景切换时按需降低音量；手动调节会保留，离开 App 时也不会自动调高。")
         footer.textColor = .secondaryLabelColor
         footer.font = .systemFont(ofSize: 11)
         root.addArrangedSubview(footer)
@@ -839,12 +855,14 @@ private final class RuleRowView: NSView {
     private let slider: NSSlider
     private let valueLabel: NSTextField
     private let enabledSwitch: NSSwitch
+    private let removeButton: NSButton
 
     init(rule: AppVolumeRule) {
         ruleID = rule.id
         slider = NSSlider(value: rule.maximumVolume, minValue: 0.20, maxValue: 1.00, target: nil, action: nil)
         valueLabel = NSTextField(labelWithString: "\(Int((rule.maximumVolume * 100).rounded()))%")
         enabledSwitch = NSSwitch()
+        removeButton = NSButton(title: "移除", target: nil, action: nil)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
@@ -877,8 +895,16 @@ private final class RuleRowView: NSView {
         enabledSwitch.translatesAutoresizingMaskIntoConstraints = false
         enabledSwitch.setAccessibilityLabel("启用 \(rule.appName) 规则")
 
-        let removeButton = NSButton(title: "移除", target: self, action: #selector(removeTapped))
-        removeButton.bezelStyle = .inline
+        removeButton.target = self
+        removeButton.action = #selector(removeTapped)
+        removeButton.setButtonType(.momentaryPushIn)
+        removeButton.bezelStyle = .rounded
+        removeButton.controlSize = .small
+        removeButton.isEnabled = true
+        removeButton.setAccessibilityLabel("移除 \(rule.appName) 规则")
+        if #available(macOS 11.0, *) {
+            removeButton.hasDestructiveAction = true
+        }
         removeButton.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(appStack)
@@ -930,6 +956,10 @@ private final class RuleRowView: NSView {
 
     @objc private func removeTapped() {
         onRemove?(ruleID)
+    }
+
+    func performRemoveForTesting() {
+        removeButton.performClick(nil)
     }
 
     private func updateEnabledAppearance() {

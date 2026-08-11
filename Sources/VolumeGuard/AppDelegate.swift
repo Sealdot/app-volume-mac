@@ -19,25 +19,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let defaults: UserDefaults
-        let suiteArgument = CommandLine.arguments.first(where: { $0.hasPrefix("--test-suite=") })
-        let suiteFromArgument = suiteArgument.flatMap { argument -> String? in
-            guard let separator = argument.firstIndex(of: "=") else { return nil }
-            return String(argument[argument.index(after: separator)...])
-        }
-        if let suiteName = ProcessInfo.processInfo.environment["VOLUME_GUARD_TEST_SUITE"] ?? suiteFromArgument,
+        if let suiteName = isolatedTestSuiteName,
            let isolatedDefaults = UserDefaults(suiteName: suiteName) {
             defaults = isolatedDefaults
         } else {
             defaults = .standard
         }
         settingsStore = SettingsStore(defaults: defaults)
-        if ProcessInfo.processInfo.environment["VOLUME_GUARD_DISABLE_PROTECTION"] == "1" {
+        if isolatedTestSuiteName != nil,
+           ProcessInfo.processInfo.environment["VOLUME_GUARD_DISABLE_PROTECTION"] == "1" {
             settingsStore.update {
                 $0.isProtectionEnabled = false
                 $0.notificationsEnabled = false
             }
         }
-        if CommandLine.arguments.contains("--ui-fixture") {
+        if isolatedTestSuiteName != nil,
+           CommandLine.arguments.contains("--ui-fixture") {
             settingsStore.update {
                 $0.defaultMaximumVolume = 0.20
                 $0.appRules = [
@@ -103,7 +100,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        if let snapshotArgument = CommandLine.arguments.first(where: { $0.hasPrefix("--snapshot-settings=") }),
+        if isolatedTestSuiteName != nil,
+           let snapshotArgument = CommandLine.arguments.first(where: { $0.hasPrefix("--snapshot-settings=") }),
            let separator = snapshotArgument.firstIndex(of: "=") {
             let path = String(snapshotArgument[snapshotArgument.index(after: separator)...])
             DispatchQueue.main.async { [weak self] in
@@ -121,6 +119,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         NSApp.terminate(nil)
                     }
+                }
+            }
+        }
+
+        if isolatedTestSuiteName != nil,
+           let resultArgument = CommandLine.arguments.first(where: { $0.hasPrefix("--test-remove-result=") }),
+           let separator = resultArgument.firstIndex(of: "=") {
+            let path = String(resultArgument[resultArgument.index(after: separator)...])
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                let didRemove = self.settingsWindowController.removeFirstRuleForTesting()
+                let result = didRemove ? "pass\n" : "fail\n"
+                try? result.write(toFile: path, atomically: true, encoding: .utf8)
+                self.settingsWindowController.close()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    NSApp.terminate(nil)
                 }
             }
         }
@@ -142,9 +156,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var isAutomationLaunch: Bool {
-        ProcessInfo.processInfo.environment["VOLUME_GUARD_TEST_SUITE"] != nil
-            || CommandLine.arguments.contains(where: { $0.hasPrefix("--test-suite=") })
-            || CommandLine.arguments.contains(where: { $0.hasPrefix("--snapshot-settings=") })
+        isolatedTestSuiteName != nil
+    }
+
+    private var isolatedTestSuiteName: String? {
+        let argument = CommandLine.arguments.first(where: { $0.hasPrefix("--test-suite=") })
+        let fromArgument = argument.flatMap { value -> String? in
+            guard let separator = value.firstIndex(of: "=") else { return nil }
+            return String(value[value.index(after: separator)...])
+        }
+        guard let name = ProcessInfo.processInfo.environment["VOLUME_GUARD_TEST_SUITE"] ?? fromArgument,
+              name.hasPrefix("com.volumeguard."),
+              name.hasSuffix(".test") else { return nil }
+        return name
     }
 
     private var shouldShowSettingsAtLaunch: Bool {

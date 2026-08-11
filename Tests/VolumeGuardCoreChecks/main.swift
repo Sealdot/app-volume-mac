@@ -151,6 +151,23 @@ private let checks: [(String, () throws -> Void)] = [
         try expect(close(second.settings.defaultMaximumVolume, 0.42), "上限未持久化")
         try expect(second.settings.launchAtLogin, "登录启动设置未持久化")
     }),
+    ("移除 App 规则后重启不会恢复", {
+        let suite = "VolumeGuardChecks.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            throw CheckFailure.failed("无法创建隔离的 UserDefaults")
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let rule = AppVolumeRule(
+            bundleIdentifier: "com.example.removed",
+            appName: "Removed",
+            maximumVolume: 0.20
+        )
+        let first = SettingsStore(defaults: defaults, storageKey: "settings")
+        first.update { $0.appRules = [rule] }
+        first.update { $0.appRules.removeAll { $0.id == rule.id } }
+        let reopened = SettingsStore(defaults: defaults, storageKey: "settings")
+        try expect(reopened.settings.appRules.isEmpty, "已移除规则不应在重启后恢复")
+    }),
     ("损坏的配置回退到安全默认值", {
         let suite = "VolumeGuardChecks.\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suite) else {

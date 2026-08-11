@@ -7,10 +7,12 @@ APP_BUNDLE="$PROJECT_DIR/dist/VolumeGuard.app"
 TEMP_DIR="$(mktemp -d)"
 GENERAL_SUITE="com.volumeguard.ui.general.$$.test"
 RULES_SUITE="com.volumeguard.ui.rules.$$.test"
+REMOVAL_SUITE="com.volumeguard.ui.removal.$$.test"
 
 cleanup() {
   defaults delete "$GENERAL_SUITE" >/dev/null 2>&1 || true
   defaults delete "$RULES_SUITE" >/dev/null 2>&1 || true
+  defaults delete "$REMOVAL_SUITE" >/dev/null 2>&1 || true
   rm -rf "$TEMP_DIR"
 }
 trap cleanup EXIT
@@ -61,4 +63,17 @@ open -n "$APP_BUNDLE" --args \
 wait_for_snapshot "$RULES_SNAPSHOT"
 check_dimensions "$RULES_SNAPSHOT" 600 440
 
+echo "设置窗口截图测试通过"
+
+REMOVAL_RESULT="$TEMP_DIR/removal-result.txt"
+open -n "$APP_BUNDLE" --args \
+  "--test-suite=$REMOVAL_SUITE" \
+  --ui-fixture \
+  "--test-remove-result=$REMOVAL_RESULT"
+wait_for_snapshot "$REMOVAL_RESULT"
+if [[ "$(tr -d '\n' < "$REMOVAL_RESULT")" != "pass" ]]; then
+  echo "UI 测试失败：移除按钮未删除规则"
+  exit 1
+fi
+echo "✓ 移除按钮动作与持久化更新通过"
 echo "设置窗口 UI 烟雾测试通过"

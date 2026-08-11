@@ -7,11 +7,13 @@ APP_BUNDLE="$PROJECT_DIR/dist/VolumeGuard.app"
 TEMP_DIR="$(mktemp -d)"
 GENERAL_SUITE="com.volumeguard.ui.general.$$.test"
 RULES_SUITE="com.volumeguard.ui.rules.$$.test"
+EMPTY_RULES_SUITE="com.volumeguard.ui.empty-rules.$$.test"
 REMOVAL_SUITE="com.volumeguard.ui.removal.$$.test"
 
 cleanup() {
   defaults delete "$GENERAL_SUITE" >/dev/null 2>&1 || true
   defaults delete "$RULES_SUITE" >/dev/null 2>&1 || true
+  defaults delete "$EMPTY_RULES_SUITE" >/dev/null 2>&1 || true
   defaults delete "$REMOVAL_SUITE" >/dev/null 2>&1 || true
   rm -rf "$TEMP_DIR"
 }
@@ -48,6 +50,7 @@ check_dimensions() {
 
 GENERAL_SNAPSHOT="$TEMP_DIR/general.png"
 RULES_SNAPSHOT="$TEMP_DIR/rules.png"
+EMPTY_RULES_SNAPSHOT="$TEMP_DIR/empty-rules.png"
 
 open -n "$APP_BUNDLE" --args \
   "--test-suite=$GENERAL_SUITE" \
@@ -61,7 +64,23 @@ open -n "$APP_BUNDLE" --args \
   --snapshot-pane=rules \
   "--snapshot-settings=$RULES_SNAPSHOT"
 wait_for_snapshot "$RULES_SNAPSHOT"
-check_dimensions "$RULES_SNAPSHOT" 600 440
+check_dimensions "$RULES_SNAPSHOT" 520 430
+
+open -n "$APP_BUNDLE" --args \
+  "--test-suite=$EMPTY_RULES_SUITE" \
+  --snapshot-pane=rules \
+  "--snapshot-settings=$EMPTY_RULES_SNAPSHOT"
+wait_for_snapshot "$EMPTY_RULES_SNAPSHOT"
+check_dimensions "$EMPTY_RULES_SNAPSHOT" 520 430
+
+general_dimensions="$(sips -g pixelWidth -g pixelHeight "$GENERAL_SNAPSHOT" | awk '/pixelWidth/ {width=$2} /pixelHeight/ {height=$2} END {print width "x" height}')"
+rules_dimensions="$(sips -g pixelWidth -g pixelHeight "$RULES_SNAPSHOT" | awk '/pixelWidth/ {width=$2} /pixelHeight/ {height=$2} END {print width "x" height}')"
+empty_rules_dimensions="$(sips -g pixelWidth -g pixelHeight "$EMPTY_RULES_SNAPSHOT" | awk '/pixelWidth/ {width=$2} /pixelHeight/ {height=$2} END {print width "x" height}')"
+if [[ "$general_dimensions" != "$rules_dimensions" || "$general_dimensions" != "$empty_rules_dimensions" ]]; then
+  echo "UI 测试失败：通用页 ${general_dimensions}、规则页 ${rules_dimensions}、空规则页 ${empty_rules_dimensions} 尺寸不一致"
+  exit 1
+fi
+echo "✓ 所有 pane 尺寸一致：$general_dimensions"
 
 echo "设置窗口截图测试通过"
 

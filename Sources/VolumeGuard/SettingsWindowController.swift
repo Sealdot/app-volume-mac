@@ -9,6 +9,7 @@ private enum SettingsPane {
 final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
     private static let generalToolbarIdentifier = NSToolbarItem.Identifier("VolumeGuard.General")
     private static let rulesToolbarIdentifier = NSToolbarItem.Identifier("VolumeGuard.Rules")
+    private static let settingsContentSize = NSSize(width: 600, height: 440)
 
     private let settingsStore: SettingsStore
     private let launchAtLoginManager: LaunchAtLoginManager
@@ -79,7 +80,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     override func loadWindow() {
         guard !hasBuiltWindow else { return }
         let settingsWindow = NSWindow(
-            contentRect: NSRect(origin: .zero, size: contentSize(for: selectedPane)),
+            contentRect: NSRect(origin: .zero, size: Self.settingsContentSize),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -105,15 +106,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         createControls()
         generalView = buildGeneralView()
         rulesView = buildRulesView()
-        showSelectedPane(animated: false)
+        showSelectedPane()
         refreshAll()
     }
 
     override func showWindow(_ sender: Any?) {
         if !hasBuiltWindow { loadWindow() }
-        super.showWindow(sender)
         refreshAll()
         NSApp.activate(ignoringOtherApps: true)
+        super.showWindow(sender)
         window?.makeKeyAndOrderFront(sender)
     }
 
@@ -123,7 +124,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         preferredRunningAppBundleIdentifier = bundleIdentifier
         selectedPane = .rules
         showWindow(nil)
-        showSelectedPane(animated: false)
+        showSelectedPane()
     }
 
     @discardableResult
@@ -158,7 +159,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     func removeFirstRuleForTesting() -> Bool {
         selectedPane = .rules
         showWindow(nil)
-        showSelectedPane(animated: false)
+        showSelectedPane()
         window?.displayIfNeeded()
         let before = settingsStore.settings.appRules.count
         guard before > 0,
@@ -346,7 +347,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         ))
         root.addArrangedSubview(settingsBox)
         settingsBox.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-        settingsBox.heightAnchor.constraint(equalToConstant: 220).isActive = true
+        settingsBox.heightAnchor.constraint(equalToConstant: 240).isActive = true
 
         let privacy = wrappingLabel("只读取和调节系统音量，不录音、不联网。20% 是防止意外高音量的默认值，不代表安全分贝。")
         privacy.textColor = .secondaryLabelColor
@@ -361,26 +362,81 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         let root = NSStackView()
         root.orientation = .vertical
         root.alignment = .leading
-        root.spacing = 12
+        root.spacing = 8
         root.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(root)
         NSLayoutConstraint.activate([
             root.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             root.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            root.topAnchor.constraint(equalTo: view.topAnchor, constant: 18),
-            root.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16)
+            root.topAnchor.constraint(equalTo: view.topAnchor, constant: 14),
+            root.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -14)
         ])
 
-        let explanation = wrappingLabel("前台 App 规则会覆盖默认保护值。切换到音乐 App 时可自动降低；之后手动调节音量不会被抢回。")
-        root.addArrangedSubview(explanation)
-        explanation.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
+        root.addArrangedSubview(sectionTitle("规则说明"))
+        let infoBox = makeGroupBox()
+        infoBox.translatesAutoresizingMaskIntoConstraints = false
+        let infoContent = NSStackView()
+        infoContent.orientation = .horizontal
+        infoContent.alignment = .centerY
+        infoContent.spacing = 12
+        infoContent.translatesAutoresizingMaskIntoConstraints = false
+        infoBox.contentView?.addSubview(infoContent)
 
-        let scopeNote = wrappingLabel("触发条件是“当前前台 App”，不是后台实际发声进程。")
+        let infoIcon = NSImageView()
+        if #available(macOS 11.0, *) {
+            infoIcon.image = NSImage(
+                systemSymbolName: "app.badge.checkmark",
+                accessibilityDescription: "App 规则"
+            )
+        }
+        infoIcon.contentTintColor = .systemBlue
+        infoIcon.translatesAutoresizingMaskIntoConstraints = false
+        infoIcon.widthAnchor.constraint(equalToConstant: 32).isActive = true
+        infoIcon.heightAnchor.constraint(equalToConstant: 32).isActive = true
+
+        let infoTitle = NSTextField(labelWithString: "按前台 App 使用独立保护值")
+        infoTitle.font = .systemFont(ofSize: 15, weight: .semibold)
+        let infoDetail = NSTextField(labelWithString: "匹配规则会覆盖默认保护值；手动调节仍会保留")
+        infoDetail.textColor = .secondaryLabelColor
+        infoDetail.font = .systemFont(ofSize: 12)
+        let scopeNote = NSTextField(labelWithString: "按当前前台 App 触发，不分析后台实际发声进程")
         scopeNote.textColor = .secondaryLabelColor
         scopeNote.font = .systemFont(ofSize: 11)
-        root.addArrangedSubview(scopeNote)
-        scopeNote.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
+        let infoText = NSStackView(views: [infoTitle, infoDetail, scopeNote])
+        infoText.orientation = .vertical
+        infoText.alignment = .leading
+        infoText.spacing = 2
+        infoContent.addArrangedSubview(infoIcon)
+        infoContent.addArrangedSubview(infoText)
+        if let content = infoBox.contentView {
+            NSLayoutConstraint.activate([
+                infoContent.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+                infoContent.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+                infoContent.topAnchor.constraint(equalTo: content.topAnchor, constant: 10),
+                infoContent.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10)
+            ])
+        }
+        root.addArrangedSubview(infoBox)
+        infoBox.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
+        infoBox.heightAnchor.constraint(equalToConstant: 86).isActive = true
 
+        root.addArrangedSubview(sectionTitle("规则管理"))
+        let rulesBox = makeGroupBox()
+        rulesBox.translatesAutoresizingMaskIntoConstraints = false
+        let managementStack = NSStackView()
+        managementStack.orientation = .vertical
+        managementStack.alignment = .leading
+        managementStack.spacing = 0
+        managementStack.translatesAutoresizingMaskIntoConstraints = false
+        rulesBox.contentView?.addSubview(managementStack)
+        if let content = rulesBox.contentView {
+            NSLayoutConstraint.activate([
+                managementStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+                managementStack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+                managementStack.topAnchor.constraint(equalTo: content.topAnchor, constant: 6),
+                managementStack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -8)
+            ])
+        }
         let addRow = NSStackView()
         addRow.orientation = .horizontal
         addRow.alignment = .centerY
@@ -391,14 +447,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         addRow.addArrangedSubview(runningAppsPopup)
         addRow.addArrangedSubview(addRunningAppButton)
         addRow.addArrangedSubview(chooseButton)
-        root.addArrangedSubview(addRow)
-        addRow.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
+        managementStack.addArrangedSubview(addRow)
+        addRow.widthAnchor.constraint(equalTo: managementStack.widthAnchor).isActive = true
+        addRow.heightAnchor.constraint(equalToConstant: 42).isActive = true
+        let addSeparator = separator()
+        managementStack.addArrangedSubview(addSeparator)
+        addSeparator.widthAnchor.constraint(equalTo: managementStack.widthAnchor).isActive = true
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
-        scrollView.borderType = .bezelBorder
+        scrollView.borderType = .noBorder
+        scrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        scrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         let rulesDocument = FlippedView()
         rulesDocument.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = rulesDocument
@@ -417,9 +479,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             rulesStack.topAnchor.constraint(equalTo: rulesDocument.topAnchor),
             rulesStack.bottomAnchor.constraint(equalTo: rulesDocument.bottomAnchor)
         ])
-        root.addArrangedSubview(scrollView)
-        scrollView.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-        scrollView.heightAnchor.constraint(equalToConstant: 250).isActive = true
+        managementStack.addArrangedSubview(scrollView)
+        scrollView.widthAnchor.constraint(equalTo: managementStack.widthAnchor).isActive = true
+        root.addArrangedSubview(rulesBox)
+        rulesBox.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
+        rulesBox.heightAnchor.constraint(equalToConstant: 220).isActive = true
 
         let footer = wrappingLabel("规则只在场景切换时按需降低音量；手动调节会保留，离开 App 时也不会自动调高。")
         footer.textColor = .secondaryLabelColor
@@ -594,7 +658,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             let empty = makeEmptyRulesView()
             rulesStack.addArrangedSubview(empty)
             empty.widthAnchor.constraint(equalTo: rulesStack.widthAnchor).isActive = true
-            empty.heightAnchor.constraint(equalToConstant: 220).isActive = true
+            empty.heightAnchor.constraint(equalToConstant: 154).isActive = true
             return
         }
         for rule in rules {
@@ -644,10 +708,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     @objc private func toolbarItemSelected(_ sender: NSToolbarItem) {
         selectedPane = sender.itemIdentifier == Self.rulesToolbarIdentifier ? .rules : .general
-        showSelectedPane(animated: true)
+        showSelectedPane()
     }
 
-    private func showSelectedPane(animated: Bool) {
+    private func showSelectedPane() {
         guard hasBuiltWindow, let contentView = window?.contentView else { return }
         let paneView = selectedPane == .general ? generalView! : rulesView!
         for subview in contentView.subviews { subview.removeFromSuperview() }
@@ -659,30 +723,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             paneView.topAnchor.constraint(equalTo: contentView.topAnchor),
             paneView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
         ])
-        resizeWindow(to: contentSize(for: selectedPane), animated: animated)
         window?.title = title(for: selectedPane)
         window?.toolbar?.selectedItemIdentifier = toolbarIdentifier(for: selectedPane)
         if selectedPane == .rules {
             refreshRunningApplications()
             rebuildRuleRows(settingsStore.settings.appRules)
-        }
-    }
-
-    private func resizeWindow(to contentSize: NSSize, animated: Bool) {
-        guard let window = window else { return }
-        let oldFrame = window.frame
-        let contentRect = NSRect(origin: .zero, size: contentSize)
-        let frameSize = window.frameRect(forContentRect: contentRect).size
-        var newFrame = oldFrame
-        newFrame.origin.y += oldFrame.height - frameSize.height
-        newFrame.size = frameSize
-        window.setFrame(newFrame, display: true, animate: animated)
-    }
-
-    private func contentSize(for pane: SettingsPane) -> NSSize {
-        switch pane {
-        case .general: return NSSize(width: 520, height: 430)
-        case .rules: return NSSize(width: 600, height: 440)
         }
     }
 
@@ -837,6 +882,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         box.borderWidth = 1
         box.borderColor = .separatorColor
         box.fillColor = .controlBackgroundColor
+        box.isTransparent = false
         box.cornerRadius = 8
         return box
     }

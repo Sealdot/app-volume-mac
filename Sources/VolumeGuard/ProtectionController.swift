@@ -120,7 +120,7 @@ final class ProtectionController {
         isPaused = true
         pauseUntil = interval.map { Date().addingTimeInterval($0) }
         configurePauseTimer()
-        evaluateNow()
+        evaluateNow(trigger: .manualCheck)
     }
 
     func resume() {
@@ -129,10 +129,6 @@ final class ProtectionController {
         pauseTimer?.invalidate()
         pauseTimer = nil
         evaluateNow(trigger: .resumed)
-    }
-
-    func evaluateNow() {
-        evaluateNow(trigger: .manualCheck)
     }
 
     private func evaluateNow(trigger: ProtectionTrigger) {

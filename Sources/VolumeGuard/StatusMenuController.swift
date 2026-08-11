@@ -144,7 +144,6 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         menu.addItem(source)
         menu.addItem(.separator())
         menu.addItem(actionItem("设置…", action: #selector(openSettings), keyEquivalent: ","))
-        menu.addItem(actionItem("立即执行保护", action: #selector(checkNow)))
         menu.addItem(.separator())
         menu.addItem(actionItem("退出音量卫士", action: #selector(quit), keyEquivalent: "q"))
     }
@@ -209,10 +208,6 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     @objc private func openSettings() {
         settingsWindowController.showWindow(self)
-    }
-
-    @objc private func checkNow() {
-        protectionController.evaluateNow()
     }
 
     @objc private func quit() {

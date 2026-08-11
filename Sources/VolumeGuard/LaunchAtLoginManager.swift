@@ -59,7 +59,9 @@ final class LaunchAtLoginManager {
         )
         let payload: [String: Any] = [
             "Label": label,
-            "ProgramArguments": [executableURL.path],
+            // A login launch stays quietly in the menu bar. Direct launches
+            // intentionally omit this flag and open Settings as feedback.
+            "ProgramArguments": [executableURL.path, "--login-item"],
             "RunAtLoad": true,
             "KeepAlive": false,
             "ProcessType": "Interactive"

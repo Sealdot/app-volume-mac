@@ -12,7 +12,7 @@ fi
 
 VOLUME_GUARD_TEST_SUITE="$TEST_SUITE" \
 VOLUME_GUARD_DISABLE_PROTECTION=1 \
-"$APP_EXECUTABLE" >/tmp/volume-guard-performance.log 2>&1 &
+"$APP_EXECUTABLE" --background >/tmp/volume-guard-performance.log 2>&1 &
 APP_PID=$!
 cleanup() {
   kill "$APP_PID" >/dev/null 2>&1 || true

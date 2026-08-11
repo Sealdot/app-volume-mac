@@ -34,6 +34,7 @@ swiftc \
   -o "$APP_DIR/Contents/MacOS/VolumeGuard"
 
 cp "$PROJECT_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
+cp "$PROJECT_DIR/Resources/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 plutil -lint "$APP_DIR/Contents/Info.plist" >/dev/null
 
 if command -v codesign >/dev/null 2>&1; then

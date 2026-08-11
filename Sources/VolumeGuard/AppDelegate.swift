@@ -2,6 +2,8 @@ import AppKit
 import VolumeGuardCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let showSettingsNotification = Notification.Name("com.volumeguard.app.showSettings")
+
     private var settingsStore: SettingsStore!
     private var eventStore: ProtectionEventStore!
     private var audioController: SystemAudioController!
@@ -9,8 +11,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchAtLoginManager: LaunchAtLoginManager!
     private var settingsWindowController: SettingsWindowController!
     private var statusMenuController: StatusMenuController!
+    private var showSettingsObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if handOffToRunningInstanceIfNeeded() {
+            return
+        }
+
         let defaults: UserDefaults
         let suiteArgument = CommandLine.arguments.first(where: { $0.hasPrefix("--test-suite=") })
         let suiteFromArgument = suiteArgument.flatMap { argument -> String? in
@@ -75,15 +82,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsWindowController: settingsWindowController
         )
 
+        showSettingsObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Self.showSettingsNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.showSettings()
+        }
+
         protectionController.onStatusChange = { [weak self] status in
             self?.statusMenuController.updateStatus(status)
         }
         protectionController.start()
 
-        // Used by local UI smoke tests; normal login launch stays silent.
-        if CommandLine.arguments.contains("--show-settings") {
+        // A direct Finder/Codex launch needs visible feedback. Login launches
+        // stay silent and test launches explicitly control their own windows.
+        if shouldShowSettingsAtLaunch {
             DispatchQueue.main.async { [weak self] in
-                self?.settingsWindowController.showWindow(nil)
+                self?.showSettings()
             }
         }
 
@@ -111,6 +127,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let observer = showSettingsObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+        }
         protectionController?.stop()
+    }
+
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        showSettings()
+        return true
+    }
+
+    private var isAutomationLaunch: Bool {
+        ProcessInfo.processInfo.environment["VOLUME_GUARD_TEST_SUITE"] != nil
+            || CommandLine.arguments.contains(where: { $0.hasPrefix("--test-suite=") })
+            || CommandLine.arguments.contains(where: { $0.hasPrefix("--snapshot-settings=") })
+    }
+
+    private var shouldShowSettingsAtLaunch: Bool {
+        if CommandLine.arguments.contains("--show-settings") {
+            return true
+        }
+        return !isAutomationLaunch
+            && !CommandLine.arguments.contains("--login-item")
+            && !CommandLine.arguments.contains("--background")
+    }
+
+    private func handOffToRunningInstanceIfNeeded() -> Bool {
+        guard !isAutomationLaunch,
+              let bundleIdentifier = Bundle.main.bundleIdentifier else {
+            return false
+        }
+
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        guard let existing = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleIdentifier)
+            .first(where: { $0.processIdentifier != currentPID && !$0.isTerminated }) else {
+            return false
+        }
+
+        DistributedNotificationCenter.default().post(
+            name: Self.showSettingsNotification,
+            object: nil,
+            userInfo: nil
+        )
+        existing.activate(options: [.activateIgnoringOtherApps])
+        NSApp.terminate(nil)
+        return true
+    }
+
+    private func showSettings() {
+        guard settingsWindowController != nil else { return }
+        settingsWindowController.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }

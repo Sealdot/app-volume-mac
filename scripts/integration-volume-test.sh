@@ -30,7 +30,7 @@ fi
 
 # Keep the whole test muted so the temporary high scalar can never make sound.
 osascript -e 'set volume with output muted' >/dev/null
-VOLUME_GUARD_TEST_SUITE="$TEST_SUITE" "$APP_EXECUTABLE" >/tmp/volume-guard-integration.log 2>&1 &
+VOLUME_GUARD_TEST_SUITE="$TEST_SUITE" "$APP_EXECUTABLE" --background >/tmp/volume-guard-integration.log 2>&1 &
 APP_PID=$!
 sleep 1
 osascript -e 'set volume output volume 82 with output muted' >/dev/null

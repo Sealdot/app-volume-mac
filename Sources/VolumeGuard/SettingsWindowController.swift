@@ -35,6 +35,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private var addRunningAppButton: NSButton!
     private var rulesStack: NSStackView!
     private var runningApplications: [NSRunningApplication] = []
+    private var preferredRunningAppBundleIdentifier: String?
 
     init(
         settingsStore: SettingsStore,
@@ -116,17 +117,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         window?.makeKeyAndOrderFront(sender)
     }
 
-    func showRules(addingBundleIdentifier bundleIdentifier: String? = nil, appName: String? = nil) {
-        if let bundleIdentifier = bundleIdentifier,
-           !settingsStore.settings.appRules.contains(where: { $0.bundleIdentifier == bundleIdentifier }) {
-            performSettingsUpdate {
-                $0.appRules.append(AppVolumeRule(
-                    bundleIdentifier: bundleIdentifier,
-                    appName: appName ?? bundleIdentifier,
-                    maximumVolume: $0.defaultMaximumVolume
-                ))
-            }
-        }
+    func showRules(focusingBundleIdentifier bundleIdentifier: String? = nil) {
+        // Navigating to settings must not mutate user data. If the foreground
+        // App has no rule, preselect it and require an explicit “添加” click.
+        preferredRunningAppBundleIdentifier = bundleIdentifier
         selectedPane = .rules
         showWindow(nil)
         showSelectedPane(animated: false)
@@ -168,14 +162,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         window?.displayIfNeeded()
         let before = settingsStore.settings.appRules.count
         guard before > 0,
+              let removedRule = settingsStore.settings.appRules.first,
               let row = rulesStack.arrangedSubviews.compactMap({ $0 as? RuleRowView }).first else {
             return false
         }
         row.performRemoveForTesting()
+        showRules(focusingBundleIdentifier: removedRule.bundleIdentifier)
         let expectedCount = before - 1
         let displayedCount = rulesStack.arrangedSubviews.compactMap { $0 as? RuleRowView }.count
         return settingsStore.settings.appRules.count == expectedCount
             && displayedCount == expectedCount
+            && !settingsStore.settings.appRules.contains { $0.bundleIdentifier == removedRule.bundleIdentifier }
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -576,6 +573,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             runningAppsPopup.addItems(withTitles: runningApplications.map { $0.localizedName ?? "未知 App" })
             runningAppsPopup.isEnabled = true
             addRunningAppButton.isEnabled = true
+            if let preferredBundleIdentifier = preferredRunningAppBundleIdentifier,
+               let index = runningApplications.firstIndex(where: {
+                   $0.bundleIdentifier == preferredBundleIdentifier
+               }) {
+                runningAppsPopup.selectItem(at: index)
+            }
         }
     }
 
@@ -709,6 +712,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         addRunningAppButton = nil
         rulesStack = nil
         runningApplications.removeAll(keepingCapacity: false)
+        preferredRunningAppBundleIdentifier = nil
     }
 
     @objc private func protectionChanged() {

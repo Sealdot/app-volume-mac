@@ -72,8 +72,8 @@ open -n "$APP_BUNDLE" --args \
   "--test-remove-result=$REMOVAL_RESULT"
 wait_for_snapshot "$REMOVAL_RESULT"
 if [[ "$(tr -d '\n' < "$REMOVAL_RESULT")" != "pass" ]]; then
-  echo "UI 测试失败：移除按钮未删除规则"
+  echo "UI 测试失败：移除后从状态栏入口重进时规则被恢复"
   exit 1
 fi
-echo "✓ 移除按钮动作与持久化更新通过"
+echo "✓ 移除后从状态栏入口重进，规则未恢复"
 echo "设置窗口 UI 烟雾测试通过"

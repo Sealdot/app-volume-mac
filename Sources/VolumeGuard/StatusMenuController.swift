@@ -141,7 +141,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             }
             let title = hasRule
                 ? "编辑 \(status.foregroundAppName) 规则…"
-                : "为 \(status.foregroundAppName) 添加规则…"
+                : "设置 \(status.foregroundAppName) 规则…"
             menu.addItem(actionItem(title, action: #selector(openCurrentAppRule)))
         }
         let source = NSMenuItem(
@@ -222,8 +222,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     @objc private func openCurrentAppRule() {
         settingsWindowController.showRules(
-            addingBundleIdentifier: status.foregroundBundleIdentifier,
-            appName: status.foregroundAppName
+            focusingBundleIdentifier: status.foregroundBundleIdentifier
         )
     }
 

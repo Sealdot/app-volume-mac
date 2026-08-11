@@ -17,6 +17,7 @@ struct GuardRuntimeStatus: Equatable {
     var deviceName: String
     var foregroundAppName: String
     var foregroundBundleIdentifier: String?
+    var isManualOverrideActive: Bool
     var lastError: String?
 }
 
@@ -35,6 +36,7 @@ final class ProtectionController {
     private var pauseUntil: Date?
     private var pauseTimer: Timer?
     private var evaluationScheduled = false
+    private var pendingTrigger: ProtectionTrigger?
     private var lastNotificationDate = Date.distantPast
 
     private(set) var status: GuardRuntimeStatus
@@ -58,6 +60,7 @@ final class ProtectionController {
             deviceName: "正在检测…",
             foregroundAppName: "无",
             foregroundBundleIdentifier: nil,
+            isManualOverrideActive: false,
             lastError: nil
         )
     }
@@ -74,7 +77,7 @@ final class ProtectionController {
             object: settingsStore,
             queue: .main
         ) { [weak self] _ in
-            self?.scheduleEvaluation()
+            self?.scheduleEvaluation(trigger: .settingsChanged)
         })
 
         let workspaceCenter = NSWorkspace.shared.notificationCenter
@@ -93,10 +96,15 @@ final class ProtectionController {
             self?.audioController.rebindMonitoring()
         })
 
-        audioController.startMonitoring { [weak self] in
-            self?.scheduleEvaluation()
+        audioController.startMonitoring { [weak self] reason in
+            switch reason {
+            case .volumeOrMute:
+                self?.scheduleEvaluation(trigger: .volumeChanged)
+            case .outputDevice:
+                self?.scheduleEvaluation(trigger: .outputDeviceChanged)
+            }
         }
-        evaluateNow()
+        evaluateNow(trigger: .startup)
     }
 
     func stop() {
@@ -120,11 +128,14 @@ final class ProtectionController {
         pauseUntil = nil
         pauseTimer?.invalidate()
         pauseTimer = nil
-        evaluateNow()
+        evaluateNow(trigger: .resumed)
     }
 
     func evaluateNow() {
-        evaluationScheduled = false
+        evaluateNow(trigger: .manualCheck)
+    }
+
+    private func evaluateNow(trigger: ProtectionTrigger) {
         refreshForegroundApplication()
 
         if let until = pauseUntil, until <= Date() {
@@ -163,7 +174,8 @@ final class ProtectionController {
                currentVolume: volume,
                settings: settings,
                foregroundBundleIdentifier: bundleID,
-               isPaused: isPaused
+               isPaused: isPaused,
+               trigger: trigger
            ) {
             do {
                 try audioController.setVolume(decision.targetVolume)
@@ -191,31 +203,42 @@ final class ProtectionController {
             deviceName: snapshot.deviceName,
             foregroundAppName: appName,
             foregroundBundleIdentifier: bundleID,
+            isManualOverrideActive: nextState == .protecting
+                && !trigger.shouldEnforceLimit
+                && (snapshot.volume ?? 0) > limit.value + 0.005,
             lastError: lastError
         )
         NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
         onStatusChange?(status)
     }
 
-    private func scheduleEvaluation() {
+    private func scheduleEvaluation(trigger: ProtectionTrigger) {
+        if pendingTrigger == nil || trigger.shouldEnforceLimit {
+            pendingTrigger = trigger
+        }
         guard !evaluationScheduled else { return }
         evaluationScheduled = true
         DispatchQueue.main.async { [weak self] in
-            self?.evaluateNow()
+            guard let self = self else { return }
+            let trigger = self.pendingTrigger ?? .manualCheck
+            self.pendingTrigger = nil
+            self.evaluationScheduled = false
+            self.evaluateNow(trigger: trigger)
         }
     }
 
     private func handleApplicationActivation(_ notification: Notification) {
-        if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-           app.bundleIdentifier != Bundle.main.bundleIdentifier {
-            lastExternalApplication = app
-        }
-        scheduleEvaluation()
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              app.bundleIdentifier != Bundle.main.bundleIdentifier,
+              app.activationPolicy == .regular else { return }
+        lastExternalApplication = app
+        scheduleEvaluation(trigger: .applicationChanged)
     }
 
     private func refreshForegroundApplication() {
         if let app = NSWorkspace.shared.frontmostApplication,
-           app.bundleIdentifier != Bundle.main.bundleIdentifier {
+           app.bundleIdentifier != Bundle.main.bundleIdentifier,
+           app.activationPolicy == .regular {
             lastExternalApplication = app
         }
     }

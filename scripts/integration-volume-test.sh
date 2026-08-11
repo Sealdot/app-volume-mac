@@ -30,10 +30,10 @@ fi
 
 # Keep the whole test muted so the temporary high scalar can never make sound.
 osascript -e 'set volume with output muted' >/dev/null
+osascript -e 'set volume output volume 82 with output muted' >/dev/null
 VOLUME_GUARD_TEST_SUITE="$TEST_SUITE" "$APP_EXECUTABLE" --background >/tmp/volume-guard-integration.log 2>&1 &
 APP_PID=$!
 sleep 1
-osascript -e 'set volume output volume 82 with output muted' >/dev/null
 
 ACTUAL_VOLUME=82
 for _ in {1..20}; do
@@ -54,4 +54,12 @@ if [[ "$ACTUAL_MUTED" != "true" ]]; then
   exit 1
 fi
 
-echo "集成测试通过：82% 自动降至 $ACTUAL_VOLUME%，且保持静音"
+osascript -e 'set volume output volume 67 with output muted' >/dev/null
+sleep 1
+MANUAL_VOLUME="$(osascript -e 'output volume of (get volume settings)')"
+if (( MANUAL_VOLUME < 60 )); then
+  echo "集成测试失败：手动调到 67% 后被抢回到 $MANUAL_VOLUME%"
+  exit 1
+fi
+
+echo "集成测试通过：启动时 82% 自动降至 $ACTUAL_VOLUME%，手动调到 67% 后保持为 $MANUAL_VOLUME%，且全程静音"

@@ -72,6 +72,26 @@ private let checks: [(String, () throws -> Void)] = [
         try expect(close(decision?.previousVolume ?? 0, 1.0), "原始音量错误")
         try expect(close(decision?.targetVolume ?? 0, 0.65), "目标音量错误")
     }),
+    ("用户手动调高音量时不抢回控制权", {
+        let decision = VolumePolicy.clampDecision(
+            currentVolume: 1.0,
+            settings: GuardSettings(defaultMaximumVolume: 0.20),
+            foregroundBundleIdentifier: nil,
+            isPaused: false,
+            trigger: .volumeChanged
+        )
+        try expect(decision == nil, "手动音量变化不应被立即压回")
+    }),
+    ("切换 App 时仍执行保护", {
+        let decision = VolumePolicy.clampDecision(
+            currentVolume: 1.0,
+            settings: GuardSettings(defaultMaximumVolume: 0.20),
+            foregroundBundleIdentifier: "com.apple.Music",
+            isPaused: false,
+            trigger: .applicationChanged
+        )
+        try expect(close(decision?.targetVolume ?? 0, 0.20), "场景切换应执行保护")
+    }),
     ("等于或低于上限时不写音量", {
         let settings = GuardSettings(defaultMaximumVolume: 0.65)
         try expect(VolumePolicy.clampDecision(

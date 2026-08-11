@@ -29,10 +29,15 @@ enum AudioControllerError: LocalizedError {
     }
 }
 
+enum AudioChangeReason {
+    case volumeOrMute
+    case outputDevice
+}
+
 /// Reads and writes only the default output device's scalar volume. It does not
 /// open an audio stream, record audio, or install a virtual audio driver.
 final class SystemAudioController {
-    typealias ChangeHandler = () -> Void
+    typealias ChangeHandler = (AudioChangeReason) -> Void
 
     private struct DeviceMetadata {
         let deviceID: AudioObjectID
@@ -63,7 +68,7 @@ final class SystemAudioController {
             guard let self = self else { return }
             self.listenerQueue.async {
                 self.bindToCurrentDevice()
-                self.deliverChange()
+                self.deliverChange(.outputDevice)
             }
         }
         systemListener = block
@@ -110,7 +115,7 @@ final class SystemAudioController {
     func rebindMonitoring() {
         listenerQueue.async { [weak self] in
             self?.bindToCurrentDevice()
-            self?.deliverChange()
+            self?.deliverChange(.outputDevice)
         }
     }
 
@@ -388,10 +393,12 @@ final class SystemAudioController {
 
         let block: AudioObjectPropertyListenerBlock = { [weak self] count, addresses in
             guard let self = self else { return }
+            var reason = AudioChangeReason.volumeOrMute
             for index in 0..<Int(count) where addresses[index].mSelector == kAudioDevicePropertyDeviceIsAlive {
                 self.invalidateDeviceMetadata()
+                reason = .outputDevice
             }
-            self.deliverChange()
+            self.deliverChange(reason)
         }
         deviceListener = block
 
@@ -441,9 +448,11 @@ final class SystemAudioController {
         invalidateDeviceMetadata()
     }
 
-    private func deliverChange() {
+    private func deliverChange(_ reason: AudioChangeReason) {
         guard let handler = handler else { return }
-        DispatchQueue.main.async(execute: handler)
+        DispatchQueue.main.async {
+            handler(reason)
+        }
     }
 
     private static var defaultOutputAddress: AudioObjectPropertyAddress {

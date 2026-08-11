@@ -1,5 +1,21 @@
 import Foundation
 
+public enum ProtectionTrigger: Equatable {
+    case startup
+    case applicationChanged
+    case outputDeviceChanged
+    case settingsChanged
+    case resumed
+    case manualCheck
+    case volumeChanged
+
+    /// A volume-only change is treated as an intentional user adjustment.
+    /// Risky context changes still enforce the configured protection value.
+    public var shouldEnforceLimit: Bool {
+        self != .volumeChanged
+    }
+}
+
 public enum VolumePolicy {
     /// An enabled foreground-app rule overrides the default limit. This lets a
     /// meeting app use a high limit while music apps stay conservative.
@@ -20,7 +36,7 @@ public enum VolumePolicy {
 
         return VolumeLimit(
             value: settings.defaultMaximumVolume,
-            sourceName: "默认上限",
+            sourceName: "默认保护值",
             isAppSpecific: false
         )
     }
@@ -30,9 +46,12 @@ public enum VolumePolicy {
         settings: GuardSettings,
         foregroundBundleIdentifier: String?,
         isPaused: Bool,
+        trigger: ProtectionTrigger = .manualCheck,
         tolerance: Double = 0.005
     ) -> ClampDecision? {
-        guard settings.isProtectionEnabled, !isPaused else { return nil }
+        guard settings.isProtectionEnabled,
+              !isPaused,
+              trigger.shouldEnforceLimit else { return nil }
         let safeVolume = min(max(currentVolume, 0), 1)
         let limit = effectiveLimit(
             settings: settings,

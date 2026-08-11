@@ -221,7 +221,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             action: #selector(globalLimitChanged)
         )
         globalSlider.isContinuous = true
-        globalSlider.setAccessibilityLabel("默认音量上限")
+        globalSlider.setAccessibilityLabel("默认保护音量")
         globalValueLabel = NSTextField(labelWithString: "20%")
         globalValueLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         globalValueLabel.alignment = .right
@@ -311,7 +311,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
         settingsStack.addArrangedSubview(makeSwitchRow(
             title: "音量保护",
-            detail: "超过当前生效上限时自动调低",
+            detail: "场景切换时防止意外高音量；手动调节会保留",
             control: protectionSwitch
         ))
         settingsStack.addArrangedSubview(separator())
@@ -355,7 +355,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             root.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16)
         ])
 
-        let explanation = wrappingLabel("前台 App 规则会覆盖默认上限。切换到音乐 App 时可自动降低，切回会议 App 时不会主动升高音量。")
+        let explanation = wrappingLabel("前台 App 规则会覆盖默认保护值。切换到音乐 App 时可自动降低；之后手动调节音量不会被抢回。")
         root.addArrangedSubview(explanation)
         explanation.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
 
@@ -449,7 +449,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     private func makeLimitRow() -> NSView {
         let row = NSView()
-        let title = NSTextField(labelWithString: "默认音量上限")
+        let title = NSTextField(labelWithString: "默认保护音量")
         title.font = .systemFont(ofSize: 13, weight: .medium)
         let detail = NSTextField(labelWithString: "没有匹配 App 规则时使用")
         detail.font = .systemFont(ofSize: 11)
@@ -497,9 +497,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         let tint: NSColor
         switch status.state {
         case .protecting:
-            statusTitleLabel.stringValue = "保护中"
-            symbolName = "checkmark.shield.fill"
-            tint = .systemGreen
+            if status.isManualOverrideActive {
+                statusTitleLabel.stringValue = "已保留手动音量"
+                symbolName = "slider.horizontal.3"
+                tint = .systemBlue
+            } else {
+                statusTitleLabel.stringValue = "场景保护中"
+                symbolName = "checkmark.shield.fill"
+                tint = .systemGreen
+            }
         case let .paused(until):
             if let until = until {
                 let formatter = DateFormatter()
@@ -525,7 +531,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         statusIconView.contentTintColor = tint
         let current = status.currentVolume.map(percent) ?? "--"
         statusDetailLabel.stringValue = "\(status.deviceName) · 当前 \(current)"
-        statusRuleLabel.stringValue = "生效上限 \(percent(status.effectiveLimit.value)) · \(status.effectiveLimit.sourceName)"
+        if status.isManualOverrideActive {
+            statusRuleLabel.stringValue = "下次场景切换保护到 \(percent(status.effectiveLimit.value)) · \(status.effectiveLimit.sourceName)"
+        } else {
+            statusRuleLabel.stringValue = "保护值 \(percent(status.effectiveLimit.value)) · \(status.effectiveLimit.sourceName)"
+        }
     }
 
     private func refreshRunningApplications() {
@@ -715,7 +725,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     @objc private func chooseInstalledApp() {
         guard let window = window else { return }
         let panel = NSOpenPanel()
-        panel.title = "选择要设置音量上限的 App"
+        panel.title = "选择要设置保护音量的 App"
         panel.prompt = "选择"
         panel.allowsMultipleSelection = false
         panel.canChooseFiles = true
@@ -855,7 +865,7 @@ private final class RuleRowView: NSView {
         slider.target = self
         slider.action = #selector(sliderChanged)
         slider.translatesAutoresizingMaskIntoConstraints = false
-        slider.setAccessibilityLabel("\(rule.appName) 音量上限")
+        slider.setAccessibilityLabel("\(rule.appName) 保护音量")
         valueLabel.alignment = .right
         valueLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         valueLabel.translatesAutoresizingMaskIntoConstraints = false

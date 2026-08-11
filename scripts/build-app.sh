@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$PROJECT_DIR/.build/volume-guard"
 APP_DIR="$PROJECT_DIR/dist/VolumeGuard.app"
+SIGNING_IDENTITY="${VOLUME_GUARD_CODESIGN_IDENTITY:--}"
 CORE_SOURCES=("$PROJECT_DIR"/Sources/VolumeGuardCore/*.swift)
 APP_SOURCES=("$PROJECT_DIR"/Sources/VolumeGuard/*.swift)
 
@@ -38,7 +39,21 @@ cp "$PROJECT_DIR/Resources/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.ic
 plutil -lint "$APP_DIR/Contents/Info.plist" >/dev/null
 
 if command -v codesign >/dev/null 2>&1; then
-  codesign --force --deep --sign - "$APP_DIR" >/dev/null
+  if [[ "$SIGNING_IDENTITY" == "-" ]]; then
+    codesign \
+      --force \
+      --options runtime \
+      --timestamp=none \
+      --sign "$SIGNING_IDENTITY" \
+      "$APP_DIR" >/dev/null
+  else
+    codesign \
+      --force \
+      --options runtime \
+      --timestamp \
+      --sign "$SIGNING_IDENTITY" \
+      "$APP_DIR" >/dev/null
+  fi
 fi
 
 echo "构建完成：$APP_DIR"

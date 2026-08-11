@@ -37,8 +37,13 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let accessibilityDescription: String
         switch status.state {
         case .protecting:
-            symbolName = "speaker.wave.2.circle.fill"
-            accessibilityDescription = "音量卫士：保护中"
+            if status.isManualOverrideActive {
+                symbolName = "speaker.wave.3.circle.fill"
+                accessibilityDescription = "音量卫士：已保留手动音量"
+            } else {
+                symbolName = "speaker.wave.2.circle.fill"
+                accessibilityDescription = "音量卫士：场景保护中"
+            }
         case .paused:
             symbolName = "pause.circle.fill"
             accessibilityDescription = "音量卫士：已暂停"
@@ -148,7 +153,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         menu.addItem(source)
         menu.addItem(.separator())
         menu.addItem(actionItem("设置…", action: #selector(openSettings), keyEquivalent: ","))
-        menu.addItem(actionItem("立即检查", action: #selector(checkNow)))
+        menu.addItem(actionItem("立即执行保护", action: #selector(checkNow)))
         menu.addItem(.separator())
         menu.addItem(actionItem("退出音量卫士", action: #selector(quit), keyEquivalent: "q"))
     }
@@ -159,7 +164,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
         switch status.state {
         case .protecting:
-            return "保护中 · 当前 \(current) · 上限 \(limit)"
+            if status.isManualOverrideActive {
+                return "手动音量 \(current) · 场景切换时保护到 \(limit)"
+            }
+            return "保护中 · 当前 \(current) · 保护值 \(limit)"
         case let .paused(until):
             if let until = until {
                 let formatter = DateFormatter()

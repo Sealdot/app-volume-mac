@@ -172,7 +172,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             return false
         }
         row.performRemoveForTesting()
-        return settingsStore.settings.appRules.count == before - 1
+        let expectedCount = before - 1
+        let displayedCount = rulesStack.arrangedSubviews.compactMap { $0 as? RuleRowView }.count
+        return settingsStore.settings.appRules.count == expectedCount
+            && displayedCount == expectedCount
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -577,7 +580,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     private func rebuildRuleRows(_ rules: [AppVolumeRule]) {
-        for view in rulesStack.arrangedSubviews {
+        // Clear the live collection one item at a time. Mutating it from a
+        // for-in loop can leave every second row visually stale even though
+        // the rule has already been removed from persistent settings.
+        while let view = rulesStack.arrangedSubviews.first {
             rulesStack.removeArrangedSubview(view)
             view.removeFromSuperview()
         }

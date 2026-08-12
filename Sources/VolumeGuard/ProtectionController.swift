@@ -37,7 +37,13 @@ final class ProtectionController {
     private var pauseTimer: Timer?
     private var evaluationScheduled = false
     private var pendingTrigger: ProtectionTrigger?
+    private var lastProtectionContext: ProtectionContext?
     private var lastNotificationDate = Date.distantPast
+
+    private struct ProtectionContext: Equatable {
+        let foregroundBundleIdentifier: String?
+        let outputDeviceIdentifier: String
+    }
 
     private(set) var status: GuardRuntimeStatus
 
@@ -102,6 +108,8 @@ final class ProtectionController {
                 self?.scheduleEvaluation(trigger: .volumeChanged)
             case .outputDevice:
                 self?.scheduleEvaluation(trigger: .outputDeviceChanged)
+            case .systemWake:
+                self?.scheduleEvaluation(trigger: .systemWake)
             }
         }
         evaluateNow(trigger: .startup)
@@ -150,6 +158,13 @@ final class ProtectionController {
             foregroundBundleIdentifier: bundleID
         )
         let snapshot = audioController.snapshot()
+        let context = ProtectionContext(
+            foregroundBundleIdentifier: bundleID,
+            outputDeviceIdentifier: snapshot.deviceIdentifier
+        )
+        let contextDidChange = lastProtectionContext.map { $0 != context } ?? true
+        let effectiveTrigger = trigger.resolvingContextChange(contextDidChange)
+        lastProtectionContext = context
 
         var nextState: GuardRuntimeState
         if !settings.isProtectionEnabled {
@@ -171,7 +186,7 @@ final class ProtectionController {
                settings: settings,
                foregroundBundleIdentifier: bundleID,
                isPaused: isPaused,
-               trigger: trigger
+               trigger: effectiveTrigger
            ) {
             do {
                 try audioController.setVolume(decision.targetVolume)
@@ -200,7 +215,7 @@ final class ProtectionController {
             foregroundAppName: appName,
             foregroundBundleIdentifier: bundleID,
             isManualOverrideActive: nextState == .protecting
-                && !trigger.shouldEnforceLimit
+                && !effectiveTrigger.shouldEnforceLimit
                 && (snapshot.volume ?? 0) > limit.value + 0.005,
             lastError: lastError
         )
@@ -209,7 +224,8 @@ final class ProtectionController {
     }
 
     private func scheduleEvaluation(trigger: ProtectionTrigger) {
-        if pendingTrigger == nil || trigger.shouldEnforceLimit {
+        if pendingTrigger == nil
+            || trigger.evaluationPriority > (pendingTrigger?.evaluationPriority ?? -1) {
             pendingTrigger = trigger
         }
         guard !evaluationScheduled else { return }

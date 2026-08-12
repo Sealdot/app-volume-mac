@@ -82,6 +82,42 @@ private let checks: [(String, () throws -> Void)] = [
         )
         try expect(decision == nil, "手动音量变化不应被立即压回")
     }),
+    ("重复 App 或设备通知不应抢回手动音量", {
+        let settings = GuardSettings(defaultMaximumVolume: 0.20)
+        for trigger in [ProtectionTrigger.applicationChanged, .outputDeviceChanged] {
+            let resolved = trigger.resolvingContextChange(false)
+            let decision = VolumePolicy.clampDecision(
+                currentVolume: 1.0,
+                settings: settings,
+                foregroundBundleIdentifier: nil,
+                isPaused: false,
+                trigger: resolved
+            )
+            try expect(decision == nil, "重复场景通知应视为手动音量变化")
+        }
+    }),
+    ("真实场景变化和唤醒仍执行保护", {
+        let settings = GuardSettings(defaultMaximumVolume: 0.20)
+        for trigger in [
+            ProtectionTrigger.applicationChanged.resolvingContextChange(true),
+            ProtectionTrigger.outputDeviceChanged.resolvingContextChange(true),
+            ProtectionTrigger.systemWake
+        ] {
+            let decision = VolumePolicy.clampDecision(
+                currentVolume: 1.0,
+                settings: settings,
+                foregroundBundleIdentifier: nil,
+                isPaused: false,
+                trigger: trigger
+            )
+            try expect(close(decision?.targetVolume ?? 0, 0.20), "真实场景变化应执行保护")
+        }
+        try expect(
+            ProtectionTrigger.systemWake.evaluationPriority
+                > ProtectionTrigger.outputDeviceChanged.evaluationPriority,
+            "唤醒检查不应被重复设备通知覆盖"
+        )
+    }),
     ("切换 App 时仍执行保护", {
         let decision = VolumePolicy.clampDecision(
             currentVolume: 1.0,

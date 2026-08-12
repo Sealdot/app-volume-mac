@@ -4,6 +4,7 @@ import Foundation
 
 struct AudioDeviceSnapshot: Equatable {
     let deviceID: AudioObjectID
+    let deviceIdentifier: String
     let deviceName: String
     let volume: Double?
     let canSetVolume: Bool
@@ -32,6 +33,7 @@ enum AudioControllerError: LocalizedError {
 enum AudioChangeReason {
     case volumeOrMute
     case outputDevice
+    case systemWake
 }
 
 /// Reads and writes only the default output device's scalar volume. It does not
@@ -41,6 +43,7 @@ final class SystemAudioController {
 
     private struct DeviceMetadata {
         let deviceID: AudioObjectID
+        let identifier: String
         let name: String
         let canSetVolume: Bool
         let outputChannelCount: UInt32
@@ -67,8 +70,12 @@ final class SystemAudioController {
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self = self else { return }
             self.listenerQueue.async {
+                let previousDeviceID = self.observedDeviceID
                 self.bindToCurrentDevice()
-                self.deliverChange(.outputDevice)
+                let reason: AudioChangeReason = previousDeviceID == self.observedDeviceID
+                    ? .volumeOrMute
+                    : .outputDevice
+                self.deliverChange(reason)
             }
         }
         systemListener = block
@@ -115,7 +122,7 @@ final class SystemAudioController {
     func rebindMonitoring() {
         listenerQueue.async { [weak self] in
             self?.bindToCurrentDevice()
-            self?.deliverChange(.outputDevice)
+            self?.deliverChange(.systemWake)
         }
     }
 
@@ -123,6 +130,7 @@ final class SystemAudioController {
         guard let deviceID = try? defaultOutputDevice() else {
             return AudioDeviceSnapshot(
                 deviceID: AudioObjectID(kAudioObjectUnknown),
+                deviceIdentifier: "no-output-device",
                 deviceName: "无输出设备",
                 volume: nil,
                 canSetVolume: false
@@ -136,6 +144,7 @@ final class SystemAudioController {
         )
         return AudioDeviceSnapshot(
             deviceID: deviceID,
+            deviceIdentifier: metadata.identifier,
             deviceName: metadata.name,
             volume: volume,
             canSetVolume: metadata.canSetVolume
@@ -334,6 +343,23 @@ final class SystemAudioController {
         return status == noErr ? name as String : "未知设备"
     }
 
+    private func deviceIdentifier(deviceID: AudioObjectID) -> String {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMaster
+        )
+        var identifier: CFString = "" as CFString
+        var size = UInt32(MemoryLayout<CFString>.size)
+        let status = withUnsafeMutablePointer(to: &identifier) { pointer in
+            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, pointer)
+        }
+        if status == noErr, !(identifier as String).isEmpty {
+            return identifier as String
+        }
+        return "audio-object-\(deviceID)"
+    }
+
     private func outputChannelCount(deviceID: AudioObjectID) -> UInt32 {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreamConfiguration,
@@ -370,6 +396,7 @@ final class SystemAudioController {
         let channelCount = outputChannelCount(deviceID: deviceID)
         let metadata = DeviceMetadata(
             deviceID: deviceID,
+            identifier: deviceIdentifier(deviceID: deviceID),
             name: deviceName(deviceID: deviceID),
             canSetVolume: hasWritableVolume(deviceID: deviceID, channelCount: channelCount),
             outputChannelCount: channelCount

@@ -234,7 +234,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             action: #selector(globalLimitChanged)
         )
         globalSlider.isContinuous = true
-        globalSlider.setAccessibilityLabel("默认保护音量")
+        globalSlider.setAccessibilityLabel("默认场景保护值")
         globalValueLabel = NSTextField(labelWithString: "20%")
         globalValueLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         globalValueLabel.alignment = .right
@@ -324,7 +324,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
         settingsStack.addArrangedSubview(makeSwitchRow(
             title: "音量保护",
-            detail: "场景切换时防止意外高音量；手动调节会保留",
+            detail: "切换场景时会直接调低系统音量；之后手动调节会保留",
             control: protectionSwitch
         ))
         settingsStack.addArrangedSubview(separator())
@@ -481,7 +481,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         rulesBox.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
         rulesBox.heightAnchor.constraint(equalToConstant: 220).isActive = true
 
-        let footer = wrappingLabel("规则只在场景切换时按需降低音量；手动调节会保留，离开 App 时也不会自动调高。")
+        let footer = wrappingLabel("规则只在真正切换 App 或输出设备时按需降低音量；手动调节会保留，离开 App 时也不会自动调高。")
         footer.textColor = .secondaryLabelColor
         footer.font = .systemFont(ofSize: 11)
         root.addArrangedSubview(footer)
@@ -525,9 +525,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     private func makeLimitRow() -> NSView {
         let row = NSView()
-        let title = NSTextField(labelWithString: "默认保护音量")
+        let title = NSTextField(labelWithString: "默认场景保护值")
         title.font = .systemFont(ofSize: 13, weight: .medium)
-        let detail = NSTextField(labelWithString: "没有匹配 App 规则时使用")
+        let detail = NSTextField(labelWithString: "未匹配规则时的系统音量上限")
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
         let labels = NSStackView(views: [title, detail])
@@ -544,7 +544,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             row.heightAnchor.constraint(equalToConstant: 62),
             labels.leadingAnchor.constraint(equalTo: row.leadingAnchor),
             labels.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            labels.widthAnchor.constraint(equalToConstant: 150),
+            labels.widthAnchor.constraint(equalToConstant: 180),
             globalSlider.leadingAnchor.constraint(equalTo: labels.trailingAnchor, constant: 10),
             globalSlider.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             globalValueLabel.leadingAnchor.constraint(equalTo: globalSlider.trailingAnchor, constant: 8),

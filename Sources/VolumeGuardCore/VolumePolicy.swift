@@ -4,6 +4,7 @@ public enum ProtectionTrigger: Equatable {
     case startup
     case applicationChanged
     case outputDeviceChanged
+    case systemWake
     case settingsChanged
     case resumed
     case manualCheck
@@ -13,6 +14,33 @@ public enum ProtectionTrigger: Equatable {
     /// Risky context changes still enforce the configured protection value.
     public var shouldEnforceLimit: Bool {
         self != .volumeChanged
+    }
+
+    /// Keeps a high-confidence check (for example, wake or settings changes)
+    /// from being replaced by a lower-confidence duplicate device callback
+    /// while evaluations are coalesced on the main queue.
+    public var evaluationPriority: Int {
+        switch self {
+        case .volumeChanged:
+            return 0
+        case .applicationChanged, .outputDeviceChanged:
+            return 1
+        default:
+            return 2
+        }
+    }
+
+    /// Core Audio and NSWorkspace can emit duplicate context notifications for
+    /// the app/device that is already active. Treating those duplicates as a
+    /// fresh scene would repeatedly undo a user's manual volume adjustment.
+    public func resolvingContextChange(_ contextDidChange: Bool) -> ProtectionTrigger {
+        switch self {
+        case .applicationChanged where !contextDidChange,
+             .outputDeviceChanged where !contextDidChange:
+            return .volumeChanged
+        default:
+            return self
+        }
     }
 }
 

@@ -45,6 +45,8 @@ public final class SettingsStore {
 }
 
 public final class ProtectionEventStore {
+    public static let didChangeNotification = Notification.Name("VolumeGuard.ProtectionEventsDidChange")
+
     private let defaults: UserDefaults
     private let storageKey: String
     private let maximumCount: Int
@@ -72,11 +74,13 @@ public final class ProtectionEventStore {
             events.removeLast(events.count - maximumCount)
         }
         persist()
+        NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
     }
 
     public func removeAll() {
         events.removeAll()
         persist()
+        NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
     }
 
     private func persist() {

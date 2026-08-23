@@ -38,14 +38,20 @@ final class ProtectionController {
     private var evaluationScheduled = false
     private var pendingTrigger: ProtectionTrigger?
     private var lastProtectionContext: ProtectionContext?
+    private var lastAudioSnapshot: AudioDeviceSnapshot?
     private var lastNotificationDate = Date.distantPast
 
     private struct ProtectionContext: Equatable {
         let foregroundBundleIdentifier: String?
         let outputDeviceIdentifier: String
+        let outputDeviceCategory: AudioDeviceCategory
     }
 
     private(set) var status: GuardRuntimeStatus
+
+    var currentAudioDevice: AudioDeviceSnapshot {
+        audioController.snapshot()
+    }
 
     init(
         settingsStore: SettingsStore,
@@ -153,14 +159,17 @@ final class ProtectionController {
         let app = lastExternalApplication
         let bundleID = app?.bundleIdentifier
         let appName = app?.localizedName ?? "无"
+        let snapshot = audioController.snapshot()
         let limit = VolumePolicy.effectiveLimit(
             settings: settings,
-            foregroundBundleIdentifier: bundleID
+            foregroundBundleIdentifier: bundleID,
+            outputDeviceIdentifier: snapshot.deviceIdentifier,
+            outputDeviceCategory: snapshot.category
         )
-        let snapshot = audioController.snapshot()
         let context = ProtectionContext(
             foregroundBundleIdentifier: bundleID,
-            outputDeviceIdentifier: snapshot.deviceIdentifier
+            outputDeviceIdentifier: snapshot.deviceIdentifier,
+            outputDeviceCategory: snapshot.category
         )
         let contextDidChange = lastProtectionContext.map { $0 != context } ?? true
         let effectiveTrigger = trigger.resolvingContextChange(contextDidChange)
@@ -179,12 +188,29 @@ final class ProtectionController {
 
         var lastError: String?
         var displayedVolume = snapshot.volume
-        if let volume = snapshot.volume,
+        let headphoneExitResult = applyHeadphoneExitProtectionIfNeeded(
+            previousSnapshot: lastAudioSnapshot,
+            currentSnapshot: snapshot,
+            settings: settings,
+            limit: limit,
+            appName: appName,
+            isPaused: isPaused
+        )
+        lastAudioSnapshot = snapshot
+        if let result = headphoneExitResult {
+            displayedVolume = result.displayedVolume
+            lastError = result.errorMessage
+            if result.errorMessage != nil && !snapshot.canSetVolume {
+                nextState = .unsupported
+            }
+        } else if let volume = snapshot.volume,
            snapshot.canSetVolume,
            let decision = VolumePolicy.clampDecision(
                currentVolume: volume,
                settings: settings,
                foregroundBundleIdentifier: bundleID,
+               outputDeviceIdentifier: snapshot.deviceIdentifier,
+               outputDeviceCategory: snapshot.category,
                isPaused: isPaused,
                trigger: effectiveTrigger
            ) {
@@ -197,9 +223,7 @@ final class ProtectionController {
                     adjustedVolume: decision.targetVolume,
                     ruleName: decision.limit.sourceName
                 )
-                eventStore.append(event)
-                onProtectionEvent?(event)
-                sendNotificationIfNeeded(event: event, settings: settings)
+                record(event: event, settings: settings)
                 displayedVolume = decision.targetVolume
             } catch {
                 lastError = error.localizedDescription
@@ -215,12 +239,142 @@ final class ProtectionController {
             foregroundAppName: appName,
             foregroundBundleIdentifier: bundleID,
             isManualOverrideActive: nextState == .protecting
-                && !effectiveTrigger.shouldEnforceLimit
+                && !effectiveTrigger.shouldEnforceLimit(in: settings.protectionMode)
                 && (snapshot.volume ?? 0) > limit.value + 0.005,
             lastError: lastError
         )
         NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
         onStatusChange?(status)
+    }
+
+    private struct HeadphoneExitResult {
+        let displayedVolume: Double?
+        let errorMessage: String?
+    }
+
+    private func applyHeadphoneExitProtectionIfNeeded(
+        previousSnapshot: AudioDeviceSnapshot?,
+        currentSnapshot: AudioDeviceSnapshot,
+        settings: GuardSettings,
+        limit: VolumeLimit,
+        appName: String,
+        isPaused: Bool
+    ) -> HeadphoneExitResult? {
+        let originalVolume = currentSnapshot.volume ?? 0
+        let contextDidChange = previousSnapshot.map {
+            $0.deviceIdentifier != currentSnapshot.deviceIdentifier
+                || $0.category != currentSnapshot.category
+        } ?? false
+        guard let decision = VolumePolicy.headphoneExitDecision(
+                  settings: settings,
+                  previousCategory: previousSnapshot?.category,
+                  currentCategory: currentSnapshot.category,
+                  contextDidChange: contextDidChange,
+                  isPaused: isPaused,
+                  currentVolume: originalVolume,
+                  effectiveLimit: limit.value,
+                  canSetVolume: currentSnapshot.canSetVolume,
+                  canSetMute: currentSnapshot.canSetMute
+              ) else { return nil }
+
+        switch decision {
+        case let .mute(adjustedVolume):
+            do {
+                try audioController.setMuted(true)
+            } catch {
+                guard currentSnapshot.canSetVolume else {
+                    return HeadphoneExitResult(
+                        displayedVolume: currentSnapshot.volume,
+                        errorMessage: error.localizedDescription
+                    )
+                }
+                return reduceAfterHeadphoneExit(
+                    currentSnapshot: currentSnapshot,
+                    settings: settings,
+                    limit: limit,
+                    appName: appName,
+                    originalVolume: originalVolume
+                )
+            }
+
+            var displayedVolume = originalVolume
+            var scalarError: String?
+            if currentSnapshot.canSetVolume, originalVolume > adjustedVolume + 0.005 {
+                do {
+                    try audioController.setVolume(adjustedVolume)
+                    displayedVolume = adjustedVolume
+                } catch {
+                    // Muting already succeeded, so keep the successful safety
+                    // action and report only the secondary scalar-write issue.
+                    scalarError = "已静音，但未能同步降低音量：\(error.localizedDescription)"
+                }
+            }
+            let event = ProtectionEvent(
+                appName: appName,
+                deviceName: currentSnapshot.deviceName,
+                previousVolume: originalVolume,
+                adjustedVolume: displayedVolume,
+                ruleName: "耳机离开保护",
+                kind: .headphoneExitMuted
+            )
+            record(event: event, settings: settings)
+            return HeadphoneExitResult(
+                displayedVolume: displayedVolume,
+                errorMessage: scalarError
+            )
+        case let .reduce(targetVolume):
+            return reduceAfterHeadphoneExit(
+                currentSnapshot: currentSnapshot,
+                settings: settings,
+                limit: limit,
+                appName: appName,
+                originalVolume: originalVolume,
+                targetVolume: targetVolume
+            )
+        case .unavailable:
+            return HeadphoneExitResult(
+                displayedVolume: currentSnapshot.volume,
+                errorMessage: "当前输出设备不支持耳机离开保护"
+            )
+        }
+    }
+
+    private func reduceAfterHeadphoneExit(
+        currentSnapshot: AudioDeviceSnapshot,
+        settings: GuardSettings,
+        limit: VolumeLimit,
+        appName: String,
+        originalVolume: Double,
+        targetVolume: Double? = nil
+    ) -> HeadphoneExitResult {
+        let target = targetVolume ?? min(originalVolume, settings.headphoneExitVolume, limit.value)
+        guard originalVolume > target + 0.005 else {
+            return HeadphoneExitResult(displayedVolume: originalVolume, errorMessage: nil)
+        }
+        do {
+            try audioController.setVolume(target)
+            let event = ProtectionEvent(
+                appName: appName,
+                deviceName: currentSnapshot.deviceName,
+                previousVolume: originalVolume,
+                adjustedVolume: target,
+                ruleName: "耳机离开保护",
+                kind: .headphoneExitReduced
+            )
+            record(event: event, settings: settings)
+            return HeadphoneExitResult(displayedVolume: target, errorMessage: nil)
+        } catch {
+            return HeadphoneExitResult(
+                displayedVolume: currentSnapshot.volume,
+                errorMessage: error.localizedDescription
+            )
+        }
+    }
+
+    private func record(event: ProtectionEvent, settings: GuardSettings) {
+        eventStore.append(event)
+        onProtectionEvent?(event)
+        sendNotificationIfNeeded(event: event, settings: settings)
     }
 
     private func scheduleEvaluation(trigger: ProtectionTrigger) {
@@ -272,14 +426,28 @@ final class ProtectionController {
         lastNotificationDate = Date()
 
         let content = UNMutableNotificationContent()
-        content.title = "音量卫士已阻止意外高音量"
-        content.body = String(
-            format: "%@：%d%% → %d%%（%@）",
-            event.appName,
-            Int((event.previousVolume * 100).rounded()),
-            Int((event.adjustedVolume * 100).rounded()),
-            event.ruleName
-        )
+        switch event.kind {
+        case .volumeReduced:
+            content.title = "音量卫士已阻止意外高音量"
+            content.body = String(
+                format: "%@：%d%% → %d%%（%@）",
+                event.appName,
+                Int((event.previousVolume * 100).rounded()),
+                Int((event.adjustedVolume * 100).rounded()),
+                event.ruleName
+            )
+        case .headphoneExitMuted:
+            content.title = "耳机已离开，输出已静音"
+            content.body = "当前输出：\(event.deviceName)"
+        case .headphoneExitReduced:
+            content.title = "耳机已离开，音量已降低"
+            content.body = String(
+                format: "%@：%d%% → %d%%",
+                event.deviceName,
+                Int((event.previousVolume * 100).rounded()),
+                Int((event.adjustedVolume * 100).rounded())
+            )
+        }
         let center = UNUserNotificationCenter.current()
         let deliver = {
             let request = UNNotificationRequest(

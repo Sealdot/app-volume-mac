@@ -4,14 +4,19 @@ import VolumeGuardCore
 private enum SettingsPane {
     case general
     case rules
+    case devices
+    case history
 }
 
 final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
     private static let generalToolbarIdentifier = NSToolbarItem.Identifier("VolumeGuard.General")
     private static let rulesToolbarIdentifier = NSToolbarItem.Identifier("VolumeGuard.Rules")
-    private static let settingsContentSize = NSSize(width: 600, height: 440)
+    private static let devicesToolbarIdentifier = NSToolbarItem.Identifier("VolumeGuard.Devices")
+    private static let historyToolbarIdentifier = NSToolbarItem.Identifier("VolumeGuard.History")
+    private static let settingsContentSize = NSSize(width: 700, height: 520)
 
     private let settingsStore: SettingsStore
+    private let eventStore: ProtectionEventStore
     private let launchAtLoginManager: LaunchAtLoginManager
     private let protectionController: ProtectionController
 
@@ -19,11 +24,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private var hasBuiltWindow = false
     private var settingsObserver: NSObjectProtocol?
     private var statusObserver: NSObjectProtocol?
+    private var eventsObserver: NSObjectProtocol?
     private var isPerformingUpdate = false
 
     private var generalView: NSView!
     private var rulesView: NSView!
+    private var devicesView: DevicesSettingsView!
+    private var historyView: HistorySettingsView!
     private var protectionSwitch: NSSwitch!
+    private var protectionModePopup: NSPopUpButton!
     private var globalSlider: NSSlider!
     private var globalValueLabel: NSTextField!
     private var loginSwitch: NSSwitch!
@@ -39,10 +48,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     init(
         settingsStore: SettingsStore,
+        eventStore: ProtectionEventStore,
         launchAtLoginManager: LaunchAtLoginManager,
         protectionController: ProtectionController
     ) {
         self.settingsStore = settingsStore
+        self.eventStore = eventStore
         self.launchAtLoginManager = launchAtLoginManager
         self.protectionController = protectionController
         super.init(window: nil)
@@ -65,6 +76,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             guard let self = self, self.hasBuiltWindow else { return }
             self.refreshStatus()
         }
+        eventsObserver = NotificationCenter.default.addObserver(
+            forName: ProtectionEventStore.didChangeNotification,
+            object: eventStore,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, self.hasBuiltWindow else { return }
+            self.historyView?.apply(events: self.eventStore.events)
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -74,6 +93,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     deinit {
         if let observer = settingsObserver { NotificationCenter.default.removeObserver(observer) }
         if let observer = statusObserver { NotificationCenter.default.removeObserver(observer) }
+        if let observer = eventsObserver { NotificationCenter.default.removeObserver(observer) }
     }
 
     override func loadWindow() {
@@ -105,6 +125,23 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         createControls()
         generalView = buildGeneralView()
         rulesView = buildRulesView()
+        devicesView = DevicesSettingsView(
+            onDeviceRuleChanged: { [weak self] snapshot, enabled, value in
+                self?.updateDeviceRule(snapshot: snapshot, enabled: enabled, maximumVolume: value)
+            },
+            onHeadphoneActionChanged: { [weak self] action in
+                self?.performSettingsUpdate { $0.headphoneExitAction = action }
+            },
+            onHeadphoneVolumeChanged: { [weak self] value in
+                self?.performSettingsUpdate { $0.headphoneExitVolume = value }
+            },
+            onTypePresetChanged: { [weak self] category, enabled, value in
+                self?.updateTypePreset(category: category, enabled: enabled, maximumVolume: value)
+            }
+        )
+        historyView = HistorySettingsView(onClear: { [weak self] in
+            self?.eventStore.removeAll()
+        })
         showSelectedPane()
         refreshAll()
     }
@@ -119,6 +156,18 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     func showRules() {
         selectedPane = .rules
+        showWindow(nil)
+        showSelectedPane()
+    }
+
+    func showDevices() {
+        selectedPane = .devices
+        showWindow(nil)
+        showSelectedPane()
+    }
+
+    func showHistory() {
+        selectedPane = .history
         showWindow(nil)
         showSelectedPane()
     }
@@ -183,15 +232,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.generalToolbarIdentifier, Self.rulesToolbarIdentifier]
+        [
+            Self.generalToolbarIdentifier,
+            Self.rulesToolbarIdentifier,
+            Self.devicesToolbarIdentifier,
+            Self.historyToolbarIdentifier
+        ]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.generalToolbarIdentifier, Self.rulesToolbarIdentifier]
+        toolbarAllowedItemIdentifiers(toolbar)
     }
 
     func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.generalToolbarIdentifier, Self.rulesToolbarIdentifier]
+        toolbarAllowedItemIdentifiers(toolbar)
     }
 
     func toolbar(
@@ -202,7 +256,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
         item.target = self
         item.action = #selector(toolbarItemSelected(_:))
-        if itemIdentifier == Self.generalToolbarIdentifier {
+        switch itemIdentifier {
+        case Self.generalToolbarIdentifier:
             item.label = "通用"
             item.paletteLabel = "通用"
             item.toolTip = "通用设置"
@@ -211,24 +266,49 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
             } else {
                 item.image = NSImage(named: NSImage.preferencesGeneralName)
             }
-        } else {
-            item.label = "App 规则"
-            item.paletteLabel = "App 规则"
-            item.toolTip = "前台 App 音量规则"
+        case Self.rulesToolbarIdentifier:
+            item.label = "场景规则"
+            item.paletteLabel = "场景规则"
+            item.toolTip = "前台 App 场景规则"
             if #available(macOS 11.0, *) {
-                item.image = NSImage(systemSymbolName: "app.badge.checkmark", accessibilityDescription: "App 规则")
+                item.image = NSImage(systemSymbolName: "app.badge.checkmark", accessibilityDescription: "场景规则")
             } else {
                 item.image = NSImage(named: NSImage.applicationIconName)
             }
+        case Self.devicesToolbarIdentifier:
+            item.label = "设备"
+            item.paletteLabel = "设备"
+            item.toolTip = "输出设备保护"
+            if #available(macOS 11.0, *) {
+                item.image = NSImage(systemSymbolName: "hifispeaker.2.fill", accessibilityDescription: "设备")
+            } else {
+                item.image = NSImage(named: NSImage.advancedName)
+            }
+        case Self.historyToolbarIdentifier:
+            item.label = "历史"
+            item.paletteLabel = "历史"
+            item.toolTip = "最近保护历史"
+            if #available(macOS 11.0, *) {
+                item.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: "历史")
+            } else {
+                item.image = NSImage(named: NSImage.infoName)
+            }
+        default:
+            return nil
         }
         return item
     }
 
     private func createControls() {
         protectionSwitch = makeSwitch(action: #selector(protectionChanged))
+        protectionModePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        protectionModePopup.addItems(withTitles: ProtectionMode.allCases.map { $0.displayName })
+        protectionModePopup.target = self
+        protectionModePopup.action = #selector(protectionModeChanged)
+        protectionModePopup.setAccessibilityLabel("保护模式")
         globalSlider = NSSlider(
             value: settingsStore.settings.defaultMaximumVolume,
-            minValue: 0.20,
+            minValue: 0.05,
             maxValue: 1.00,
             target: self,
             action: #selector(globalLimitChanged)
@@ -324,8 +404,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
         settingsStack.addArrangedSubview(makeSwitchRow(
             title: "音量保护",
-            detail: "切换场景时会直接调低系统音量；之后手动调节会保留",
+            detail: "按生效规则降低系统音量，绝不自动调高",
             control: protectionSwitch
+        ))
+        settingsStack.addArrangedSubview(separator())
+        settingsStack.addArrangedSubview(makeChoiceRow(
+            title: "保护模式",
+            detail: "智能模式尊重手调；严格模式持续执行上限",
+            control: protectionModePopup
         ))
         settingsStack.addArrangedSubview(separator())
         settingsStack.addArrangedSubview(makeLimitRow())
@@ -343,7 +429,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         ))
         root.addArrangedSubview(settingsBox)
         settingsBox.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-        settingsBox.heightAnchor.constraint(equalToConstant: 240).isActive = true
+        settingsBox.heightAnchor.constraint(equalToConstant: 294).isActive = true
 
         let privacy = wrappingLabel("只读取和调节系统音量，不录音、不联网。20% 是防止意外高音量的默认值，不代表安全分贝。")
         privacy.textColor = .secondaryLabelColor
@@ -382,7 +468,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         if #available(macOS 11.0, *) {
             infoIcon.image = NSImage(
                 systemSymbolName: "app.badge.checkmark",
-                accessibilityDescription: "App 规则"
+                accessibilityDescription: "场景规则"
             )
         }
         infoIcon.contentTintColor = .systemBlue
@@ -390,12 +476,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         infoIcon.widthAnchor.constraint(equalToConstant: 32).isActive = true
         infoIcon.heightAnchor.constraint(equalToConstant: 32).isActive = true
 
-        let infoTitle = NSTextField(labelWithString: "按前台 App 使用独立保护值")
+        let infoTitle = NSTextField(labelWithString: "按前台 App 切换场景保护值")
         infoTitle.font = .systemFont(ofSize: 15, weight: .semibold)
-        let infoDetail = NSTextField(labelWithString: "匹配规则会覆盖默认保护值；手动调节仍会保留")
+        let infoDetail = NSTextField(labelWithString: "这是场景规则，不是后台发声 App 的独立混音器")
         infoDetail.textColor = .secondaryLabelColor
         infoDetail.font = .systemFont(ofSize: 12)
-        let scopeNote = NSTextField(labelWithString: "按当前前台 App 触发，不分析后台实际发声进程")
+        let scopeNote = NSTextField(labelWithString: "优先级：前台场景 → 当前设备 → 设备类型预设 → 默认值")
         scopeNote.textColor = .secondaryLabelColor
         scopeNote.font = .systemFont(ofSize: 11)
         let infoText = NSStackView(views: [infoTitle, infoDetail, scopeNote])
@@ -481,7 +567,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         rulesBox.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
         rulesBox.heightAnchor.constraint(equalToConstant: 220).isActive = true
 
-        let footer = wrappingLabel("规则只在真正切换 App 或输出设备时按需降低音量；手动调节会保留，离开 App 时也不会自动调高。")
+        let footer = wrappingLabel("智能模式仅在真正切换场景时降低音量；严格模式会持续执行上限。两种模式都不会自动调高音量。")
         footer.textColor = .secondaryLabelColor
         footer.font = .systemFont(ofSize: 11)
         root.addArrangedSubview(footer)
@@ -523,6 +609,32 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         return row
     }
 
+    private func makeChoiceRow(title: String, detail: String, control: NSControl) -> NSView {
+        let row = NSView()
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        let detailLabel = NSTextField(labelWithString: detail)
+        detailLabel.font = .systemFont(ofSize: 11)
+        detailLabel.textColor = .secondaryLabelColor
+        let labels = NSStackView(views: [titleLabel, detailLabel])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 1
+        labels.translatesAutoresizingMaskIntoConstraints = false
+        control.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(labels)
+        row.addSubview(control)
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(equalToConstant: 49),
+            labels.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            labels.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            control.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            control.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            control.widthAnchor.constraint(greaterThanOrEqualToConstant: 170)
+        ])
+        return row
+    }
+
     private func makeLimitRow() -> NSView {
         let row = NSView()
         let title = NSTextField(labelWithString: "默认场景保护值")
@@ -558,6 +670,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     private func refreshAll() {
         let settings = settingsStore.settings
         protectionSwitch.state = settings.isProtectionEnabled ? .on : .off
+        protectionModePopup.selectItem(at: ProtectionMode.allCases.firstIndex(of: settings.protectionMode) ?? 0)
         globalSlider.doubleValue = settings.defaultMaximumVolume
         globalValueLabel.stringValue = percent(settings.defaultMaximumVolume)
         loginSwitch.state = launchAtLoginManager.isEnabled ? .on : .off
@@ -565,6 +678,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         refreshStatus()
         refreshRunningApplications()
         rebuildRuleRows(settings.appRules)
+        devicesView?.apply(snapshot: protectionController.currentAudioDevice, settings: settings)
+        historyView?.apply(events: eventStore.events)
     }
 
     private func refreshStatus() {
@@ -578,7 +693,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
                 symbolName = "slider.horizontal.3"
                 tint = .systemBlue
             } else {
-                statusTitleLabel.stringValue = "场景保护中"
+                statusTitleLabel.stringValue = settingsStore.settings.protectionMode == .strict
+                    ? "严格上限保护中"
+                    : "智能场景保护中"
                 symbolName = "checkmark.shield.fill"
                 tint = .systemGreen
             }
@@ -697,13 +814,24 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
     }
 
     @objc private func toolbarItemSelected(_ sender: NSToolbarItem) {
-        selectedPane = sender.itemIdentifier == Self.rulesToolbarIdentifier ? .rules : .general
+        switch sender.itemIdentifier {
+        case Self.rulesToolbarIdentifier: selectedPane = .rules
+        case Self.devicesToolbarIdentifier: selectedPane = .devices
+        case Self.historyToolbarIdentifier: selectedPane = .history
+        default: selectedPane = .general
+        }
         showSelectedPane()
     }
 
     private func showSelectedPane() {
         guard hasBuiltWindow, let contentView = window?.contentView else { return }
-        let paneView = selectedPane == .general ? generalView! : rulesView!
+        let paneView: NSView
+        switch selectedPane {
+        case .general: paneView = generalView
+        case .rules: paneView = rulesView
+        case .devices: paneView = devicesView
+        case .history: paneView = historyView
+        }
         for subview in contentView.subviews { subview.removeFromSuperview() }
         paneView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(paneView)
@@ -718,15 +846,32 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         if selectedPane == .rules {
             refreshRunningApplications()
             rebuildRuleRows(settingsStore.settings.appRules)
+        } else if selectedPane == .devices {
+            devicesView.apply(
+                snapshot: protectionController.currentAudioDevice,
+                settings: settingsStore.settings
+            )
+        } else if selectedPane == .history {
+            historyView.apply(events: eventStore.events)
         }
     }
 
     private func title(for pane: SettingsPane) -> String {
-        pane == .general ? "通用" : "App 规则"
+        switch pane {
+        case .general: return "通用"
+        case .rules: return "场景规则"
+        case .devices: return "设备保护"
+        case .history: return "保护历史"
+        }
     }
 
     private func toolbarIdentifier(for pane: SettingsPane) -> NSToolbarItem.Identifier {
-        pane == .general ? Self.generalToolbarIdentifier : Self.rulesToolbarIdentifier
+        switch pane {
+        case .general: return Self.generalToolbarIdentifier
+        case .rules: return Self.rulesToolbarIdentifier
+        case .devices: return Self.devicesToolbarIdentifier
+        case .history: return Self.historyToolbarIdentifier
+        }
     }
 
     private func releaseWindowResources() {
@@ -734,7 +879,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         hasBuiltWindow = false
         generalView = nil
         rulesView = nil
+        devicesView = nil
+        historyView = nil
         protectionSwitch = nil
+        protectionModePopup = nil
         globalSlider = nil
         globalValueLabel = nil
         loginSwitch = nil
@@ -751,6 +899,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
 
     @objc private func protectionChanged() {
         performSettingsUpdate { $0.isProtectionEnabled = protectionSwitch.state == .on }
+    }
+
+    @objc private func protectionModeChanged() {
+        let index = protectionModePopup.indexOfSelectedItem
+        guard ProtectionMode.allCases.indices.contains(index) else { return }
+        performSettingsUpdate { $0.protectionMode = ProtectionMode.allCases[index] }
+        refreshStatus()
     }
 
     @objc private func globalLimitChanged() {
@@ -846,6 +1001,47 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTo
         refreshAll()
     }
 
+    private func updateDeviceRule(
+        snapshot: AudioDeviceSnapshot,
+        enabled: Bool,
+        maximumVolume: Double
+    ) {
+        performSettingsUpdate { settings in
+            if let index = settings.deviceRules.firstIndex(where: {
+                $0.deviceIdentifier == snapshot.deviceIdentifier
+            }) {
+                settings.deviceRules[index].isEnabled = enabled
+                settings.deviceRules[index].maximumVolume = maximumVolume
+                settings.deviceRules[index].deviceName = snapshot.deviceName
+            } else if enabled {
+                settings.deviceRules.append(DeviceVolumeRule(
+                    deviceIdentifier: snapshot.deviceIdentifier,
+                    deviceName: snapshot.deviceName,
+                    maximumVolume: maximumVolume
+                ))
+            }
+        }
+    }
+
+    private func updateTypePreset(
+        category: AudioDeviceCategory,
+        enabled: Bool,
+        maximumVolume: Double
+    ) {
+        performSettingsUpdate { settings in
+            if let index = settings.deviceTypePresets.firstIndex(where: { $0.category == category }) {
+                settings.deviceTypePresets[index].isEnabled = enabled
+                settings.deviceTypePresets[index].maximumVolume = maximumVolume
+            } else {
+                settings.deviceTypePresets.append(DeviceTypePreset(
+                    category: category,
+                    maximumVolume: maximumVolume,
+                    isEnabled: enabled
+                ))
+            }
+        }
+    }
+
     private func performSettingsUpdate(_ mutation: (inout GuardSettings) -> Void) {
         isPerformingUpdate = true
         settingsStore.update(mutation)
@@ -904,7 +1100,7 @@ private final class RuleRowView: NSView {
 
     init(rule: AppVolumeRule) {
         ruleID = rule.id
-        slider = NSSlider(value: rule.maximumVolume, minValue: 0.20, maxValue: 1.00, target: nil, action: nil)
+        slider = NSSlider(value: rule.maximumVolume, minValue: 0.05, maxValue: 1.00, target: nil, action: nil)
         valueLabel = NSTextField(labelWithString: "\(Int((rule.maximumVolume * 100).rounded()))%")
         enabledSwitch = NSSwitch()
         removeButton = NSButton(title: "移除", target: nil, action: nil)

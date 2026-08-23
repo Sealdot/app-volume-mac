@@ -114,13 +114,20 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
         if let lastEvent = eventStore.events.first {
             menu.addItem(.separator())
-            let item = NSMenuItem(
-                title: String(
+            let title: String
+            switch lastEvent.kind {
+            case .volumeReduced, .headphoneExitReduced:
+                title = String(
                     format: "最近保护：%@ %d%% → %d%%",
                     lastEvent.appName,
                     Int((lastEvent.previousVolume * 100).rounded()),
                     Int((lastEvent.adjustedVolume * 100).rounded())
-                ),
+                )
+            case .headphoneExitMuted:
+                title = "最近保护：耳机离开后已静音"
+            }
+            let item = NSMenuItem(
+                title: title,
                 action: nil,
                 keyEquivalent: ""
             )

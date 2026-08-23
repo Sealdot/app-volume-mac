@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var protectionController: ProtectionController!
     private var launchAtLoginManager: LaunchAtLoginManager!
     private var settingsWindowController: SettingsWindowController!
+    private var onboardingWindowController: OnboardingWindowController!
     private var statusMenuController: StatusMenuController!
     private var showSettingsObserver: NSObjectProtocol?
 
@@ -49,9 +50,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         maximumVolume: 0.20
                     )
                 ]
+                $0.hasCompletedOnboarding = true
             }
         }
+        if isolatedTestSuiteName != nil,
+           CommandLine.arguments.contains("--strict-protection") {
+            settingsStore.update { $0.protectionMode = .strict }
+        }
         eventStore = ProtectionEventStore(defaults: defaults, maximumCount: 20)
+        if isolatedTestSuiteName != nil,
+           CommandLine.arguments.contains("--ui-fixture"),
+           eventStore.events.isEmpty {
+            eventStore.append(ProtectionEvent(
+                date: Date().addingTimeInterval(-75),
+                appName: "音乐",
+                deviceName: "MacBook 扬声器",
+                previousVolume: 0.82,
+                adjustedVolume: 0.20,
+                ruleName: "音乐"
+            ))
+            eventStore.append(ProtectionEvent(
+                date: Date().addingTimeInterval(-30),
+                appName: "Finder",
+                deviceName: "MacBook 扬声器",
+                previousVolume: 0.67,
+                adjustedVolume: 0.20,
+                ruleName: "耳机离开保护",
+                kind: .headphoneExitMuted
+            ))
+        }
         audioController = SystemAudioController()
         launchAtLoginManager = LaunchAtLoginManager()
         launchAtLoginManager.refreshPathIfEnabled()
@@ -69,8 +96,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         settingsWindowController = SettingsWindowController(
             settingsStore: settingsStore,
+            eventStore: eventStore,
             launchAtLoginManager: launchAtLoginManager,
             protectionController: protectionController
+        )
+        onboardingWindowController = OnboardingWindowController(
+            settingsStore: settingsStore,
+            onCompletion: { [weak self] in self?.showSettings() }
         )
         statusMenuController = StatusMenuController(
             settingsStore: settingsStore,
@@ -96,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // stay silent and test launches explicitly control their own windows.
         if shouldShowSettingsAtLaunch {
             DispatchQueue.main.async { [weak self] in
-                self?.showSettings()
+                self?.showPrimaryWindow()
             }
         }
 
@@ -108,6 +140,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self = self else { return }
                 if CommandLine.arguments.contains("--snapshot-pane=rules") {
                     self.settingsWindowController.showRules()
+                } else if CommandLine.arguments.contains("--snapshot-pane=devices") {
+                    self.settingsWindowController.showDevices()
+                } else if CommandLine.arguments.contains("--snapshot-pane=history") {
+                    self.settingsWindowController.showHistory()
                 } else {
                     self.settingsWindowController.showWindow(nil)
                 }
@@ -119,6 +155,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         NSApp.terminate(nil)
                     }
+                }
+            }
+        }
+
+        if isolatedTestSuiteName != nil,
+           let snapshotArgument = CommandLine.arguments.first(where: { $0.hasPrefix("--snapshot-onboarding=") }),
+           let separator = snapshotArgument.firstIndex(of: "=") {
+            let path = String(snapshotArgument[snapshotArgument.index(after: separator)...])
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.onboardingWindowController.showWindow(nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    let didWrite = self.onboardingWindowController.writeSnapshot(to: URL(fileURLWithPath: path))
+                    let result = didWrite ? "引导截图已写入：\(path)\n" : "引导截图写入失败：\(path)\n"
+                    FileHandle.standardError.write(Data(result.utf8))
+                    self.onboardingWindowController.close()
+                    NSApp.terminate(nil)
                 }
             }
         }
@@ -207,5 +260,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard settingsWindowController != nil else { return }
         settingsWindowController.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func showPrimaryWindow() {
+        if settingsStore.settings.hasCompletedOnboarding {
+            showSettings()
+        } else {
+            onboardingWindowController.showWindow(nil)
+        }
     }
 }

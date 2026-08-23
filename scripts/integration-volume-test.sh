@@ -62,4 +62,39 @@ if (( MANUAL_VOLUME < 60 )); then
   exit 1
 fi
 
-echo "集成测试通过：启动时 82% 自动降至 $ACTUAL_VOLUME%，手动调到 67% 后保持为 $MANUAL_VOLUME%，且全程静音"
+kill "$APP_PID" >/dev/null 2>&1 || true
+wait "$APP_PID" >/dev/null 2>&1 || true
+APP_PID=""
+
+# Strict mode must clamp direct manual changes as well as scene changes.
+osascript -e 'set volume output volume 78 with output muted' >/dev/null
+VOLUME_GUARD_TEST_SUITE="$TEST_SUITE" "$APP_EXECUTABLE" --background --strict-protection \
+  >/tmp/volume-guard-integration-strict.log 2>&1 &
+APP_PID=$!
+for _ in {1..20}; do
+  sleep 0.1
+  STRICT_START_VOLUME="$(osascript -e 'output volume of (get volume settings)')"
+  if (( STRICT_START_VOLUME <= 21 )); then
+    break
+  fi
+done
+if (( STRICT_START_VOLUME > 21 )); then
+  echo "集成测试失败：严格模式启动后音量仍为 $STRICT_START_VOLUME%"
+  exit 1
+fi
+
+osascript -e 'set volume output volume 67 with output muted' >/dev/null
+STRICT_MANUAL_VOLUME=67
+for _ in {1..20}; do
+  sleep 0.1
+  STRICT_MANUAL_VOLUME="$(osascript -e 'output volume of (get volume settings)')"
+  if (( STRICT_MANUAL_VOLUME <= 21 )); then
+    break
+  fi
+done
+if (( STRICT_MANUAL_VOLUME > 21 )); then
+  echo "集成测试失败：严格模式未压回手动音量，当前为 $STRICT_MANUAL_VOLUME%"
+  exit 1
+fi
+
+echo "集成测试通过：智能模式保留手调 $MANUAL_VOLUME%，严格模式压回到 $STRICT_MANUAL_VOLUME%，且全程静音"

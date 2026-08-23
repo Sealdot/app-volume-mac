@@ -1,19 +1,24 @@
 import AudioToolbox
 import CoreAudio
 import Foundation
+import VolumeGuardCore
 
 struct AudioDeviceSnapshot: Equatable {
     let deviceID: AudioObjectID
     let deviceIdentifier: String
     let deviceName: String
+    let category: AudioDeviceCategory
     let volume: Double?
     let canSetVolume: Bool
+    let isMuted: Bool?
+    let canSetMute: Bool
 }
 
 enum AudioControllerError: LocalizedError {
     case noOutputDevice
     case volumeUnavailable
     case volumeReadOnly
+    case muteReadOnly
     case coreAudio(operation: String, status: OSStatus)
 
     var errorDescription: String? {
@@ -24,6 +29,8 @@ enum AudioControllerError: LocalizedError {
             return "当前输出设备不提供系统音量"
         case .volumeReadOnly:
             return "当前输出设备的音量由硬件控制"
+        case .muteReadOnly:
+            return "当前输出设备不提供系统静音控制"
         case let .coreAudio(operation, status):
             return "\(operation)失败（Core Audio \(status)）"
         }
@@ -45,7 +52,9 @@ final class SystemAudioController {
         let deviceID: AudioObjectID
         let identifier: String
         let name: String
+        let category: AudioDeviceCategory
         let canSetVolume: Bool
+        let canSetMute: Bool
         let outputChannelCount: UInt32
     }
 
@@ -132,8 +141,11 @@ final class SystemAudioController {
                 deviceID: AudioObjectID(kAudioObjectUnknown),
                 deviceIdentifier: "no-output-device",
                 deviceName: "无输出设备",
+                category: .other,
                 volume: nil,
-                canSetVolume: false
+                canSetVolume: false,
+                isMuted: nil,
+                canSetMute: false
             )
         }
 
@@ -146,8 +158,11 @@ final class SystemAudioController {
             deviceID: deviceID,
             deviceIdentifier: metadata.identifier,
             deviceName: metadata.name,
+            category: metadata.category,
             volume: volume,
-            canSetVolume: metadata.canSetVolume
+            canSetVolume: metadata.canSetVolume,
+            isMuted: currentMute(deviceID: deviceID, channelCount: metadata.outputChannelCount),
+            canSetMute: metadata.canSetMute
         )
     }
 
@@ -229,6 +244,57 @@ final class SystemAudioController {
         }
     }
 
+    func setMuted(_ muted: Bool) throws {
+        let deviceID = try defaultOutputDevice()
+        let metadata = metadataForDevice(deviceID)
+        var muteValue: UInt32 = muted ? 1 : 0
+
+        var masterAddress = Self.muteAddress(element: kAudioObjectPropertyElementMaster)
+        if isSettable(deviceID: deviceID, address: &masterAddress) {
+            let status = AudioObjectSetPropertyData(
+                deviceID,
+                &masterAddress,
+                0,
+                nil,
+                UInt32(MemoryLayout<UInt32>.size),
+                &muteValue
+            )
+            guard status == noErr else {
+                throw AudioControllerError.coreAudio(operation: "设置静音", status: status)
+            }
+            return
+        }
+
+        guard metadata.outputChannelCount > 0 else { throw AudioControllerError.muteReadOnly }
+        var didSetAnyChannel = false
+        var lastError: OSStatus = noErr
+        for channel in UInt32(1)...metadata.outputChannelCount {
+            var address = Self.muteAddress(element: channel)
+            guard isSettable(deviceID: deviceID, address: &address) else { continue }
+            var value = muteValue
+            let status = AudioObjectSetPropertyData(
+                deviceID,
+                &address,
+                0,
+                nil,
+                UInt32(MemoryLayout<UInt32>.size),
+                &value
+            )
+            if status == noErr {
+                didSetAnyChannel = true
+            } else {
+                lastError = status
+            }
+        }
+        guard didSetAnyChannel else {
+            if lastError == noErr { throw AudioControllerError.muteReadOnly }
+            throw AudioControllerError.coreAudio(operation: "设置声道静音", status: lastError)
+        }
+        if lastError != noErr {
+            throw AudioControllerError.coreAudio(operation: "设置部分声道静音", status: lastError)
+        }
+    }
+
     private func defaultOutputDevice() throws -> AudioObjectID {
         var address = Self.defaultOutputAddress
         var deviceID = AudioObjectID(kAudioObjectUnknown)
@@ -304,6 +370,34 @@ final class SystemAudioController {
         return status == noErr ? value : nil
     }
 
+    private func readUInt32(
+        deviceID: AudioObjectID,
+        address: inout AudioObjectPropertyAddress
+    ) -> UInt32? {
+        guard AudioObjectHasProperty(deviceID, &address) else { return nil }
+        var value = UInt32(0)
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value)
+        return status == noErr ? value : nil
+    }
+
+    private func currentMute(deviceID: AudioObjectID, channelCount: UInt32) -> Bool? {
+        var masterAddress = Self.muteAddress(element: kAudioObjectPropertyElementMaster)
+        if let value = readUInt32(deviceID: deviceID, address: &masterAddress) {
+            return value != 0
+        }
+        guard channelCount > 0 else { return nil }
+        var values: [UInt32] = []
+        for channel in UInt32(1)...channelCount {
+            var address = Self.muteAddress(element: channel)
+            if let value = readUInt32(deviceID: deviceID, address: &address) {
+                values.append(value)
+            }
+        }
+        guard !values.isEmpty else { return nil }
+        return values.allSatisfy { $0 != 0 }
+    }
+
     private func hasWritableVolume(deviceID: AudioObjectID, channelCount: UInt32) -> Bool {
         var virtualMasterAddress = Self.virtualMasterVolumeAddress
         if isSettable(deviceID: deviceID, address: &virtualMasterAddress) { return true }
@@ -314,6 +408,17 @@ final class SystemAudioController {
         guard channelCount > 0 else { return false }
         for channel in UInt32(1)...channelCount {
             var address = Self.volumeAddress(element: channel)
+            if isSettable(deviceID: deviceID, address: &address) { return true }
+        }
+        return false
+    }
+
+    private func hasWritableMute(deviceID: AudioObjectID, channelCount: UInt32) -> Bool {
+        var masterAddress = Self.muteAddress(element: kAudioObjectPropertyElementMaster)
+        if isSettable(deviceID: deviceID, address: &masterAddress) { return true }
+        guard channelCount > 0 else { return false }
+        for channel in UInt32(1)...channelCount {
+            var address = Self.muteAddress(element: channel)
             if isSettable(deviceID: deviceID, address: &address) { return true }
         }
         return false
@@ -360,6 +465,78 @@ final class SystemAudioController {
         return "audio-object-\(deviceID)"
     }
 
+    private func dataSourceIdentifier(deviceID: AudioObjectID) -> UInt32? {
+        var sourceAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDataSource,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMaster
+        )
+        return readUInt32(deviceID: deviceID, address: &sourceAddress)
+    }
+
+    private func dataSourceName(deviceID: AudioObjectID) -> String? {
+        guard var sourceID = dataSourceIdentifier(deviceID: deviceID) else { return nil }
+        var nameAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDataSourceNameForIDCFString,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMaster
+        )
+        guard AudioObjectHasProperty(deviceID, &nameAddress) else { return nil }
+        var name: CFString = "" as CFString
+        var size = UInt32(MemoryLayout<CFString>.size)
+        let status = withUnsafePointer(to: &sourceID) { sourcePointer in
+            withUnsafeMutablePointer(to: &name) { namePointer in
+                AudioObjectGetPropertyData(
+                    deviceID,
+                    &nameAddress,
+                    UInt32(MemoryLayout<UInt32>.size),
+                    sourcePointer,
+                    &size,
+                    namePointer
+                )
+            }
+        }
+        guard status == noErr, !(name as String).isEmpty else { return nil }
+        return name as String
+    }
+
+    private func deviceCategory(deviceID: AudioObjectID, name: String) -> AudioDeviceCategory {
+        let normalizedName = "\(name) \(dataSourceName(deviceID: deviceID) ?? "")".lowercased()
+        let headphoneHints = [
+            "headphone", "headset", "earphone", "airpods", "earbuds", "buds",
+            "耳机", "耳麥", "耳機", "beats", "wh-", "wf-"
+        ]
+        let looksLikeHeadphones = headphoneHints.contains { normalizedName.contains($0) }
+        var transportAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMaster
+        )
+        let transport = readUInt32(deviceID: deviceID, address: &transportAddress)
+
+        switch transport {
+        case kAudioDeviceTransportTypeBuiltIn:
+            return looksLikeHeadphones ? .wiredHeadphones : .builtInSpeakers
+        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE:
+            return looksLikeHeadphones ? .wirelessHeadphones : .externalSpeakers
+        case kAudioDeviceTransportTypeAirPlay:
+            return .airPlay
+        case kAudioDeviceTransportTypeHDMI, kAudioDeviceTransportTypeDisplayPort:
+            return .display
+        case kAudioDeviceTransportTypeUSB:
+            return looksLikeHeadphones ? .wiredHeadphones : .usbAudio
+        default:
+            if looksLikeHeadphones { return .wiredHeadphones }
+            if normalizedName.contains("display") || normalizedName.contains("monitor") {
+                return .display
+            }
+            if normalizedName.contains("speaker") || normalizedName.contains("扬声器") {
+                return .externalSpeakers
+            }
+            return .other
+        }
+    }
+
     private func outputChannelCount(deviceID: AudioObjectID) -> UInt32 {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreamConfiguration,
@@ -394,11 +571,18 @@ final class SystemAudioController {
         metadataLock.unlock()
 
         let channelCount = outputChannelCount(deviceID: deviceID)
+        let name = deviceName(deviceID: deviceID)
+        let baseIdentifier = deviceIdentifier(deviceID: deviceID)
+        let identifier = dataSourceIdentifier(deviceID: deviceID).map {
+            "\(baseIdentifier)#source-\($0)"
+        } ?? baseIdentifier
         let metadata = DeviceMetadata(
             deviceID: deviceID,
-            identifier: deviceIdentifier(deviceID: deviceID),
-            name: deviceName(deviceID: deviceID),
+            identifier: identifier,
+            name: name,
+            category: deviceCategory(deviceID: deviceID, name: name),
             canSetVolume: hasWritableVolume(deviceID: deviceID, channelCount: channelCount),
+            canSetMute: hasWritableMute(deviceID: deviceID, channelCount: channelCount),
             outputChannelCount: channelCount
         )
         metadataLock.lock()
@@ -421,9 +605,14 @@ final class SystemAudioController {
         let block: AudioObjectPropertyListenerBlock = { [weak self] count, addresses in
             guard let self = self else { return }
             var reason = AudioChangeReason.volumeOrMute
-            for index in 0..<Int(count) where addresses[index].mSelector == kAudioDevicePropertyDeviceIsAlive {
-                self.invalidateDeviceMetadata()
-                reason = .outputDevice
+            for index in 0..<Int(count) {
+                switch addresses[index].mSelector {
+                case kAudioDevicePropertyDeviceIsAlive, kAudioDevicePropertyDataSource:
+                    self.invalidateDeviceMetadata()
+                    reason = .outputDevice
+                default:
+                    break
+                }
             }
             self.deliverChange(reason)
         }
@@ -440,6 +629,11 @@ final class SystemAudioController {
             AudioObjectPropertyAddress(
                 mSelector: kAudioDevicePropertyDeviceIsAlive,
                 mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMaster
+            ),
+            AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDataSource,
+                mScope: kAudioDevicePropertyScopeOutput,
                 mElement: kAudioObjectPropertyElementMaster
             )
         ]
@@ -493,6 +687,14 @@ final class SystemAudioController {
     private static func volumeAddress(element: UInt32) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyVolumeScalar,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: element
+        )
+    }
+
+    private static func muteAddress(element: UInt32) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyMute,
             mScope: kAudioDevicePropertyScopeOutput,
             mElement: element
         )

@@ -4,8 +4,8 @@ VolumeGuard is designed to work entirely on the Mac where it is installed.
 
 ## Data accessed
 
-- the default audio output device name, software volume scalar, mute state, and whether the
-  device exposes writable system volume controls;
+- the default audio output device identifier, name, transport/data-source category, software
+  volume scalar, mute state, and whether the device exposes writable volume or mute controls;
 - the current foreground application's display name and bundle identifier, for optional App rules;
 - basic metadata from an `.app` explicitly selected in the macOS file picker.
 
@@ -14,9 +14,10 @@ virtual audio device, or send analytics, crash reports, settings, or usage data 
 
 ## Data stored locally
 
-- protection settings and App rules;
-- up to 20 recent protection events containing time, application name, output device name, and
-  the before/after volume percentages;
+- protection mode, default/device/device-type protection settings, foreground App scene rules,
+  headphone-exit behavior, and whether onboarding has been completed;
+- up to 20 recent protection events containing the action type, time, application name, output
+  device name, and the before/after volume percentages;
 - an optional user-owned LaunchAgent plist when “登录时启动” is enabled.
 
 Settings and events use the app's local `UserDefaults` domain. Protection notifications can include

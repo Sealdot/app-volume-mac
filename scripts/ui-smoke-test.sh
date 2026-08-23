@@ -9,12 +9,18 @@ GENERAL_SUITE="com.volumeguard.ui.general.$$.test"
 RULES_SUITE="com.volumeguard.ui.rules.$$.test"
 EMPTY_RULES_SUITE="com.volumeguard.ui.empty-rules.$$.test"
 REMOVAL_SUITE="com.volumeguard.ui.removal.$$.test"
+DEVICES_SUITE="com.volumeguard.ui.devices.$$.test"
+HISTORY_SUITE="com.volumeguard.ui.history.$$.test"
+ONBOARDING_SUITE="com.volumeguard.ui.onboarding.$$.test"
 
 cleanup() {
   defaults delete "$GENERAL_SUITE" >/dev/null 2>&1 || true
   defaults delete "$RULES_SUITE" >/dev/null 2>&1 || true
   defaults delete "$EMPTY_RULES_SUITE" >/dev/null 2>&1 || true
   defaults delete "$REMOVAL_SUITE" >/dev/null 2>&1 || true
+  defaults delete "$DEVICES_SUITE" >/dev/null 2>&1 || true
+  defaults delete "$HISTORY_SUITE" >/dev/null 2>&1 || true
+  defaults delete "$ONBOARDING_SUITE" >/dev/null 2>&1 || true
   rm -rf "$TEMP_DIR"
 }
 trap cleanup EXIT
@@ -51,6 +57,9 @@ check_dimensions() {
 GENERAL_SNAPSHOT="$TEMP_DIR/general.png"
 RULES_SNAPSHOT="$TEMP_DIR/rules.png"
 EMPTY_RULES_SNAPSHOT="$TEMP_DIR/empty-rules.png"
+DEVICES_SNAPSHOT="$TEMP_DIR/devices.png"
+HISTORY_SNAPSHOT="$TEMP_DIR/history.png"
+ONBOARDING_SNAPSHOT="$TEMP_DIR/onboarding.png"
 
 open -n "$APP_BUNDLE" --args \
   "--test-suite=$GENERAL_SUITE" \
@@ -73,11 +82,35 @@ open -n "$APP_BUNDLE" --args \
 wait_for_snapshot "$EMPTY_RULES_SNAPSHOT"
 check_dimensions "$EMPTY_RULES_SNAPSHOT" 520 430
 
+open -n "$APP_BUNDLE" --args \
+  "--test-suite=$DEVICES_SUITE" \
+  --ui-fixture \
+  --snapshot-pane=devices \
+  "--snapshot-settings=$DEVICES_SNAPSHOT"
+wait_for_snapshot "$DEVICES_SNAPSHOT"
+check_dimensions "$DEVICES_SNAPSHOT" 620 500
+
+open -n "$APP_BUNDLE" --args \
+  "--test-suite=$HISTORY_SUITE" \
+  --ui-fixture \
+  --snapshot-pane=history \
+  "--snapshot-settings=$HISTORY_SNAPSHOT"
+wait_for_snapshot "$HISTORY_SNAPSHOT"
+check_dimensions "$HISTORY_SNAPSHOT" 620 500
+
+open -n "$APP_BUNDLE" --args \
+  "--test-suite=$ONBOARDING_SUITE" \
+  "--snapshot-onboarding=$ONBOARDING_SNAPSHOT"
+wait_for_snapshot "$ONBOARDING_SNAPSHOT"
+check_dimensions "$ONBOARDING_SNAPSHOT" 580 400
+
 general_dimensions="$(sips -g pixelWidth -g pixelHeight "$GENERAL_SNAPSHOT" | awk '/pixelWidth/ {width=$2} /pixelHeight/ {height=$2} END {print width "x" height}')"
 rules_dimensions="$(sips -g pixelWidth -g pixelHeight "$RULES_SNAPSHOT" | awk '/pixelWidth/ {width=$2} /pixelHeight/ {height=$2} END {print width "x" height}')"
 empty_rules_dimensions="$(sips -g pixelWidth -g pixelHeight "$EMPTY_RULES_SNAPSHOT" | awk '/pixelWidth/ {width=$2} /pixelHeight/ {height=$2} END {print width "x" height}')"
-if [[ "$general_dimensions" != "$rules_dimensions" || "$general_dimensions" != "$empty_rules_dimensions" ]]; then
-  echo "UI 测试失败：通用页 ${general_dimensions}、规则页 ${rules_dimensions}、空规则页 ${empty_rules_dimensions} 尺寸不一致"
+devices_dimensions="$(sips -g pixelWidth -g pixelHeight "$DEVICES_SNAPSHOT" | awk '/pixelWidth/ {width=$2} /pixelHeight/ {height=$2} END {print width "x" height}')"
+history_dimensions="$(sips -g pixelWidth -g pixelHeight "$HISTORY_SNAPSHOT" | awk '/pixelWidth/ {width=$2} /pixelHeight/ {height=$2} END {print width "x" height}')"
+if [[ "$general_dimensions" != "$rules_dimensions" || "$general_dimensions" != "$empty_rules_dimensions" || "$general_dimensions" != "$devices_dimensions" || "$general_dimensions" != "$history_dimensions" ]]; then
+  echo "UI 测试失败：通用 ${general_dimensions}、规则 ${rules_dimensions}、空规则 ${empty_rules_dimensions}、设备 ${devices_dimensions}、历史 ${history_dimensions} 尺寸不一致"
   exit 1
 fi
 echo "✓ 所有 pane 尺寸一致：$general_dimensions"

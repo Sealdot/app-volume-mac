@@ -1,0 +1,36 @@
+{
+  "asset": "VolumeGuard app icon",
+  "generatedOn": "2026-08-23",
+  "iosArtworkMaster": {
+    "path": "Resources/AppIcon-iOS.png",
+    "width": 1024,
+    "height": 1024,
+    "format": "PNG RGB, sRGB, opaque, square and unmasked",
+    "sha256": "84c37d19ad67f6090533860729e148ae32f67d8b567dd1370e5bd3b7b9fa4993"
+  },
+  "macOSMaster": {
+    "path": "Resources/AppIcon.png",
+    "width": 1024,
+    "height": 1024,
+    "format": "PNG RGBA, sRGB, legacy mask export",
+    "sha256": "5e09d7da5c37be3cc0287a98f89399567d4d97d2faff2f072db4ba91512ddbfa"
+  },
+  "macOSBundleIcon": {
+    "path": "Resources/AppIcon.icns",
+    "format": "ICNS",
+    "sha256": "618b3a1bdd673076c5d11effabd05c1a2d69b7d772151390f59e7c37adfe74a7"
+  },
+  "iconset": [
+    { "path": "Resources/AppIcon.iconset/icon_16x16.png", "size": 16, "sha256": "e8d56ca463aa18c9d9936a28a1398b8672e7a7d7e81995ee1ae5ecd45ebe7b24" },
+    { "path": "Resources/AppIcon.iconset/icon_16x16@2x.png", "size": 32, "sha256": "76af7f0e0d639e3f1abd63bdb8faaff9b2d44c5896e0af67025fc221cffbcf36" },
+    { "path": "Resources/AppIcon.iconset/icon_32x32.png", "size": 32, "sha256": "76af7f0e0d639e3f1abd63bdb8faaff9b2d44c5896e0af67025fc221cffbcf36" },
+    { "path": "Resources/AppIcon.iconset/icon_32x32@2x.png", "size": 64, "sha256": "86d26511631a5bd90447d9409b62290a02c9f31d976a78dc000e2e69f0458274" },
+    { "path": "Resources/AppIcon.iconset/icon_128x128.png", "size": 128, "sha256": "e23de9df51a173133e5be398895a95caf553b3b202805cec7d9b52a6b1dd01b6" },
+    { "path": "Resources/AppIcon.iconset/icon_128x128@2x.png", "size": 256, "sha256": "d42317f796542bd4c93f9de8d0b054be093185f6fb8295d83862eb65679085e0" },
+    { "path": "Resources/AppIcon.iconset/icon_256x256.png", "size": 256, "sha256": "d42317f796542bd4c93f9de8d0b054be093185f6fb8295d83862eb65679085e0" },
+    { "path": "Resources/AppIcon.iconset/icon_256x256@2x.png", "size": 512, "sha256": "5821c987461fe2103f4313bc4d910fde7a405f3c99cde9c9b2660694ed1f38cc" },
+    { "path": "Resources/AppIcon.iconset/icon_512x512.png", "size": 512, "sha256": "5821c987461fe2103f4313bc4d910fde7a405f3c99cde9c9b2660694ed1f38cc" },
+    { "path": "Resources/AppIcon.iconset/icon_512x512@2x.png", "size": 1024, "sha256": "5e09d7da5c37be3cc0287a98f89399567d4d97d2faff2f072db4ba91512ddbfa" }
+  ],
+  "reexportCommand": "python3 scripts/export-app-icon.py Resources/AppIcon-iOS.png --macos-mask-template Resources/AppIcon.png"
+}

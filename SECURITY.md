@@ -4,10 +4,10 @@
 
 | Version | Security updates |
 |---|---|
-| 0.4.x | Yes |
-| 0.3.x and earlier | No |
+| 0.5.x (source tree) | Yes |
+| 0.4.x and earlier | No |
 
-Please reproduce an issue with the latest release or the default branch before reporting it.
+There is no published binary release yet. Please reproduce an issue with the default branch before reporting it.
 
 ## Reporting a vulnerability
 

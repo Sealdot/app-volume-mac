@@ -1,6 +1,16 @@
 # 音量卫士 VolumeGuard
 
+[简体中文](README.md) · [English](README.en.md)
+
 一个原生、轻量的 macOS 菜单栏 App，在启动、切换 App 或切换输出设备等场景变化时，避免遗留高音量突然震耳，同时尊重用户之后的手动调节。
+
+**项目状态：** 公开源码，MIT 许可。当前源码中的 App 版本为 0.5.0；当前构建仅支持 Apple Silicon Mac。应用界面目前为简体中文；本页和英文说明提供双语项目文档。
+
+## 下载与安装
+
+- [直接下载 v0.5.0 源码 ZIP](https://github.com/Sealdot/app-volume-mac/archive/refs/tags/v0.5.0.zip)；[下载默认分支最新源码 ZIP](https://github.com/Sealdot/app-volume-mac/archive/refs/heads/codex/volume-guard-macos.zip)。
+- 当前没有已签名、公证的安装包；源码 ZIP 需要在 Mac 上构建，不能直接当作 App 打开。
+- 如需从源码运行，请在 Mac 上安装 Apple Command Line Tools，然后按下方“快速开始”操作。当前构建目标为 arm64，不支持 Intel Mac。
 
 ## 已实现
 
